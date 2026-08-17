@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import SoftAurora from "@/components/SoftAurora";
 import { useRouter } from "next/navigation";
@@ -32,9 +32,13 @@ export default function ChatPage() {
   const [initialMessage, setInitialMessage] = useState("");
   const [isStartingChat, setIsStartingChat] = useState(false);
   
-  // UI Toggles (Default true sa desktop, false sa mobile)
+  // UI Toggles
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+
+  // State para sa Mobile Long Press / Active Emoji Menu per Message ID
+  const [activeReactionMessageId, setActiveReactionMessageId] = useState<number | null>(null);
+  const pressTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Prototype Database State
   const [conversations, setConversations] = useState<Conversation[]>([
@@ -137,6 +141,20 @@ export default function ChatPage() {
         return chat;
       })
     );
+    setActiveReactionMessageId(null);
+  };
+
+  // Handlers para sa Mobile Long Press Detection
+  const handleTouchStart = (messageId: number) => {
+    pressTimer.current = setTimeout(() => {
+      setActiveReactionMessageId(messageId);
+    }, 500);
+  };
+
+  const handleTouchEnd = () => {
+    if (pressTimer.current) {
+      clearTimeout(pressTimer.current);
+    }
   };
 
   const handleLogout = () => {
@@ -152,7 +170,7 @@ export default function ChatPage() {
   const activeConversation = conversations.find(c => c.id === activeChatId);
 
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-[#0a0a0e] text-white flex font-sans">
+    <div className="relative h-[100dvh] w-full overflow-hidden bg-[#0a0a0e] text-white flex font-sans">
       
       {/* 1. BLURRED AMBIENT BACKGROUND */}
       <div className="absolute inset-0 z-0 pointer-events-none">
@@ -169,7 +187,7 @@ export default function ChatPage() {
         />
       </div>
 
-      {/* MOBILE SIDEBAR BACKDROP (Makita ra sa mobile kung abli ang sidebar) */}
+      {/* MOBILE SIDEBAR BACKDROP */}
       {isSidebarOpen && (
         <div 
           onClick={() => setIsSidebarOpen(false)} 
@@ -177,7 +195,7 @@ export default function ChatPage() {
         />
       )}
 
-      {/* 2. GEMINI-STYLE SIDEBAR (Responsive Width & Drawer Logic) */}
+      {/* 2. GEMINI-STYLE SIDEBAR */}
       <motion.aside 
         initial={false}
         animate={{ width: isSidebarOpen ? 288 : 0 }} 
@@ -312,7 +330,7 @@ export default function ChatPage() {
         </div>
       </motion.aside>
 
-      {/* 3. MAIN CHAT AREA (Mo-expand na husto kung ma-toggle off ang sidebar) */}
+      {/* 3. MAIN CHAT AREA */}
       <main className="relative z-25 flex-1 h-full flex flex-col bg-transparent min-w-0">
         
         {/* Top Header */}
@@ -348,20 +366,29 @@ export default function ChatPage() {
           <div className="w-10"></div>
         </header>
 
-        {/* Chat Messages / Welcome Area */}
+        {/* Chat Messages / Welcome Area (Gibalhin sa limpyong flex container aron matangtang ang DaisyUI triangle pointers) */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col gap-4 max-w-3xl w-full mx-auto justify-center">
           {activeChatId !== null && activeConversation ? (
             activeConversation.messages.map((msg) => (
-              <div key={msg.id} className={`chat ${msg.sender === "You" ? "chat-end" : "chat-start"} group relative`}>
-                <div className="chat-header text-xs text-white/50 mb-1">
+              <div 
+                key={msg.id} 
+                className={`flex flex-col w-full my-1 group relative ${
+                  msg.sender === "You" ? "items-end" : "items-start"
+                }`}
+              >
+                <div className="text-xs text-white/50 mb-1 px-1">
                   {msg.sender} <time className="text-[10px] opacity-50 ml-1">{msg.time}</time>
                 </div>
                 
-                <div className="relative max-w-[85%] sm:max-w-md">
-                  <div className={`chat-bubble text-sm py-3 px-4 shadow-lg ${
+                <div 
+                  className="relative max-w-[85%] sm:max-w-md"
+                  onTouchStart={() => handleTouchStart(msg.id)}
+                  onTouchEnd={handleTouchEnd}
+                >
+                  <div className={`text-sm py-3 px-4 shadow-lg rounded-2xl ${
                     msg.sender === "You" 
-                      ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-2xl rounded-tr-sm" 
-                      : "bg-white/10 backdrop-blur-md text-white rounded-2xl rounded-tl-sm border border-white/10"
+                      ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-tr-sm" 
+                      : "bg-white/10 backdrop-blur-md text-white rounded-tl-sm border border-white/10"
                   }`}>
                     {msg.text}
 
@@ -372,16 +399,16 @@ export default function ChatPage() {
                     )}
                   </div>
 
-                  {/* Hover Quick Emoji Bar */}
-                  <div className={`absolute top-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 hidden sm:flex items-center gap-1 bg-black/60 backdrop-blur-md border border-white/10 rounded-full px-2 py-1 shadow-xl ${
-                    msg.sender === "You" ? "-left-48" : "-right-48"
-                  }`}>
-                    <button onClick={() => handleReactMessage(msg.id, "❤️")} className="hover:scale-125 transition-transform text-sm cursor-pointer">❤️</button>
-                    <button onClick={() => handleReactMessage(msg.id, "👍")} className="hover:scale-125 transition-transform text-sm cursor-pointer">👍</button>
-                    <button onClick={() => handleReactMessage(msg.id, "😂")} className="hover:scale-125 transition-transform text-sm cursor-pointer">😂</button>
-                    <button onClick={() => handleReactMessage(msg.id, "🔥")} className="hover:scale-125 transition-transform text-sm cursor-pointer">🔥</button>
-                    <button onClick={() => handleReactMessage(msg.id, "😮")} className="hover:scale-125 transition-transform text-sm cursor-pointer">😮</button>
-                    <button onClick={() => handleReactMessage(msg.id, "👀")} className="hover:scale-125 transition-transform text-sm cursor-pointer">👀</button>
+                  {/* Hover Quick Emoji Bar (PC) / Active State (Mobile Long Press) */}
+                  <div className={`absolute top-0 transition-opacity duration-200 flex items-center gap-1 bg-black/80 backdrop-blur-md border border-white/10 rounded-full px-2 py-1 shadow-xl z-30 ${
+                    activeReactionMessageId === msg.id ? "opacity-100 flex" : "opacity-0 group-hover:opacity-100 hidden sm:flex"
+                  } ${msg.sender === "You" ? "-left-48" : "-right-48"}`}>
+                    <button onClick={() => handleReactMessage(msg.id, "❤️")} className="hover:scale-125 transition-transform text-sm cursor-pointer p-1">❤️</button>
+                    <button onClick={() => handleReactMessage(msg.id, "👍")} className="hover:scale-125 transition-transform text-sm cursor-pointer p-1">👍</button>
+                    <button onClick={() => handleReactMessage(msg.id, "😂")} className="hover:scale-125 transition-transform text-sm cursor-pointer p-1">😂</button>
+                    <button onClick={() => handleReactMessage(msg.id, "🔥")} className="hover:scale-125 transition-transform text-sm cursor-pointer p-1">🔥</button>
+                    <button onClick={() => handleReactMessage(msg.id, "😮")} className="hover:scale-125 transition-transform text-sm cursor-pointer p-1">😮</button>
+                    <button onClick={() => handleReactMessage(msg.id, "👀")} className="hover:scale-125 transition-transform text-sm cursor-pointer p-1">👀</button>
                   </div>
                 </div>
 

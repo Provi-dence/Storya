@@ -26,7 +26,6 @@ export default function Home() {
     
     setTimeout(() => {
       setIsLoading(false);
-      // Human og enter sa email, balhin sa code verification step
       setModalStep('code');
     }, 1200);
   };
@@ -41,11 +40,9 @@ export default function Home() {
     setTimeout(() => {
       setIsLoading(false);
       
-      // I-close ang modal
       const modal = document.getElementById('login_modal') as HTMLDialogElement;
       modal?.close();
 
-      // Redirect sa chat page
       router.push('/home');
     }, 1200);
   };
@@ -58,7 +55,7 @@ export default function Home() {
   };
 
   return (
-    <main className="relative min-h-screen w-full overflow-x-hidden bg-[#0a0a0e] flex items-center justify-center font-sans">
+    <main className="relative h-[100dvh] w-full overflow-hidden bg-[#0a0a0e] flex items-center justify-center font-sans">
       
       {/* 1. BACKGROUND ANIMATION */}
       <div className="absolute inset-0 z-0">
@@ -77,13 +74,13 @@ export default function Home() {
       </div>
 
       {/* 2. FOREGROUND CONTENT */}
-      <div className="hero relative z-10 w-full px-4 sm:px-6 md:px-8 py-10">
+      <div className="hero relative z-10 w-full px-4 sm:px-6 md:px-8 py-6">
         <div className="hero-content text-center w-full max-w-5xl mx-auto">
           <div className="max-w-4xl flex flex-col items-center w-full">
             
             {/* Top Pill Badge */}
-            <div className="inline-flex items-center gap-2.5 px-1.5 py-1.5 pr-4 border border-white/10 bg-white/5 backdrop-blur-md mb-6 sm:mb-8 shadow-xl rounded-full">
-              <span className="bg-white text-black font-bold text-[10px] sm:text-[11px] uppercase tracking-wider px-3 py-1 rounded-full shadow-sm">
+            <div className="inline-flex items-center gap-2 px-1.5 py-1.5 pr-4 border border-white/10 bg-white/5 backdrop-blur-md mb-4 sm:mb-6 shadow-xl rounded-full">
+              <span className="bg-white text-black font-bold text-[9px] sm:text-[10px] uppercase tracking-wider px-2.5 py-0.5 rounded-full shadow-sm">
                 Created by
               </span>
               <span className="text-xs sm:text-sm text-white/90 font-medium pr-1">
@@ -92,18 +89,18 @@ export default function Home() {
             </div>
 
             {/* Main Heading */}
-            <h1 className="text-5xl sm:text-6xl md:text-7xl lg:text-[6rem] font-extrabold sm:mb-6 text-white tracking-tight leading-[1.1]">
+            <h1 className="text-4xl sm:text-6xl md:text-7xl lg:text-[5.5rem] font-extrabold mb-3 sm:mb-4 text-white tracking-tight leading-[1.1]">
               MON CHER
             </h1>
             
             {/* Subheading */}
-            <p className="text-base sm:text-lg md:text-xl font-medium text-white/80 mb-10 sm:mb-12 max-w-sm sm:max-w-md md:max-w-xl mx-auto leading-relaxed">
-              Bridging the distance, right through the office walls. <br />
+            <p className="text-sm sm:text-lg md:text-xl font-medium text-white/80 mb-8 sm:mb-10 max-w-xs sm:max-w-md md:max-w-xl mx-auto leading-relaxed">
+              Bridging the distance, right through the office walls.
             </p>
             
             {/* Action Buttons */}
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full max-w-[18rem] sm:max-w-none mx-auto">
-              <div className="w-full sm:w-[280px] md:w-[300px]">
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full max-w-[16rem] sm:max-w-none mx-auto">
+              <div className="w-full sm:w-[260px] md:w-[280px]">
                 <motion.div
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.95 }}
@@ -122,7 +119,7 @@ export default function Home() {
                   >
                     <button 
                       onClick={() => (document.getElementById('login_modal') as HTMLDialogElement)?.showModal()}
-                      className="w-full min-h-[3.5rem] md:min-h-[4rem] flex items-center justify-center gap-2 text-white/90 hover:text-white font-semibold text-sm md:text-base bg-transparent border-none outline-none transition-all duration-200 cursor-pointer rounded-2xl"
+                      className="w-full min-h-[3.2rem] md:min-h-[3.8rem] flex items-center justify-center gap-2 text-white/90 hover:text-white font-semibold text-sm md:text-base bg-transparent border-none outline-none transition-all duration-200 cursor-pointer rounded-2xl"
                     >
                       Log in
                     </button>
@@ -168,7 +165,7 @@ export default function Home() {
                   <button 
                     type="submit" 
                     disabled={isLoading}
-                    className="btn bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 border-none text-white w-full rounded-xl h-12 font-semibold text-base shadow-lg disabled:opacity-80"
+                    className="btn bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 border-none text-white w-full rounded-xl h-12 font-semibold text-base shadow-lg disabled:opacity-80 cursor-pointer"
                   >
                     {isLoading ? (
                       <>
@@ -210,7 +207,7 @@ export default function Home() {
                   <button 
                     type="submit" 
                     disabled={isLoading}
-                    className="btn bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 border-none text-white w-full rounded-xl h-12 font-semibold text-base shadow-lg disabled:opacity-80"
+                    className="btn bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 border-none text-white w-full rounded-xl h-12 font-semibold text-base shadow-lg disabled:opacity-80 cursor-pointer"
                   >
                     {isLoading ? (
                       <>
@@ -225,7 +222,7 @@ export default function Home() {
                   <button 
                     type="button" 
                     onClick={() => setModalStep('email')}
-                    className="btn btn-ghost btn-sm text-white/50 hover:text-white mt-2"
+                    className="btn btn-ghost btn-sm text-white/50 hover:text-white mt-2 cursor-pointer"
                   >
                     ← Back to email input
                   </button>
@@ -236,7 +233,7 @@ export default function Home() {
 
           {/* Close button */}
           <form method="dialog">
-            <button onClick={resetModal} className="btn btn-sm btn-circle btn-ghost absolute right-4 top-4 text-white/70 hover:text-white hidden sm:flex">
+            <button onClick={resetModal} className="btn btn-sm btn-circle btn-ghost absolute right-4 top-4 text-white/70 hover:text-white hidden sm:flex cursor-pointer">
               ✕
             </button>
           </form>
