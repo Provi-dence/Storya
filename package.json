@@ -15,6 +15,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "daisyui": "^5.7.16",
+    "firebase": "^12.17.1",
     "framer-motion": "^13.1.0",
     "motion": "^12.43.0",
     "next": "16.3.1",
