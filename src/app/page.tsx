@@ -93,7 +93,7 @@ export default function Home() {
 
             {/* Main Heading */}
             <h1 className="text-5xl sm:text-6xl md:text-7xl lg:text-[6rem] font-extrabold sm:mb-6 text-white tracking-tight leading-[1.1]">
-              STORYA TA
+              MON CHER
             </h1>
             
             {/* Subheading */}
