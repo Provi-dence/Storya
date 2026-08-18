@@ -53,33 +53,62 @@ export default function Home() {
   // Step 1: I-generate ang dynamic OTP ug i-send sa Backend (Nodemailer)
   const handleRequestCode = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!senderEmail) return;
-    
+
     setIsLoading(true);
-    
+
     const newOTP = Math.floor(100000 + Math.random() * 900000).toString();
     setGeneratedOTP(newOTP);
-    
+
     try {
-      const response = await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: senderEmail, code: newOTP }),
+      console.log("📨 Calling /api/send-email...");
+
+      const response = await fetch("/api/send-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: senderEmail,
+          code: newOTP,
+        }),
       });
 
-      if (response.ok) {
-        setModalStep('code');
-        showCustomToast("Secure login code sent to your email!", "success");
-      } else {
-        showCustomToast("Napakyas sa pag-send sa email. I-check ang console.", "error");
+      const data = await response.json();
+
+      console.log("📩 API Response:", {
+        status: response.status,
+        ok: response.ok,
+        data,
+      });
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data?.error || "Failed to send verification email"
+        );
       }
-    } catch (error) {
-      console.error("Fetch error:", error);
-      showCustomToast("Something went wrong!", "error");
+
+      setModalStep("code");
+
+      showCustomToast(
+        "Secure login code sent to your email!",
+        "success"
+      );
+
+    } catch (error: any) {
+      console.error("❌ Send Email Error:", error);
+
+      showCustomToast(
+        error?.message || "Something went wrong!",
+        "error"
+      );
+
     } finally {
       setIsLoading(false);
     }
   };
+
 
   // Step 2: I-verify ang OTP usa pa isulod sa Firebase
   const handleVerifyCode = async (e: React.FormEvent) => {
