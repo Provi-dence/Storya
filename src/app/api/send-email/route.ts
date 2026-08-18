@@ -18,8 +18,8 @@ export async function POST(req: Request) {
       port: 465,
       secure: true, // True para sa port 465 (SSL)
       auth: {
-        user: "jundrel.alonzo@gmail.com",
-        pass: "nzcbbcymndkzyptf",
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
       },
     });
 
