@@ -19,10 +19,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Check environment variables
-    //const emailUser = process.env.EMAIL_USER;
-    //const emailPass = process.env.EMAIL_PASS;
-
     // Check environment variables updated dapat ingani.
     const runtimeEnvironment = process.env;
 
