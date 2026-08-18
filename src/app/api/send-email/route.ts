@@ -5,16 +5,24 @@ export async function POST(req: Request) {
   try {
     const { email, code } = await req.json();
 
-    // Setup sa email sender gamit ang imong Gmail gikan sa .env.local
+    if (!email || !code) {
+      return NextResponse.json(
+        { success: false, error: "Missing email or verification code" }, 
+        { status: 400 }
+      );
+    }
+
+    // Explicit SMTP configuration para hapsay ug walay error sa Netlify production
     const transporter = nodemailer.createTransport({
-      service: 'gmail',
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true, // True para sa port 465 (SSL)
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
       },
     });
 
-    // Design sa email nga madawat sa user
     const mailOptions = {
       from: `"MON CHER" <${process.env.EMAIL_USER}>`,
       to: email,
@@ -34,8 +42,12 @@ export async function POST(req: Request) {
     await transporter.sendMail(mailOptions);
 
     return NextResponse.json({ success: true, message: "Email sent successfully" });
-  } catch (error) {
-    console.error("Email error:", error);
-    return NextResponse.json({ success: false, error: "Failed to send email" }, { status: 500 });
+  } catch (error: any) {
+    // I-capture ug i-return ang eksaktong error message sa response para makita nimo dayon kung naay problema sa auth
+    console.error("Nodemailer Error Details:", error);
+    return NextResponse.json(
+      { success: false, error: error.message || "Failed to send email" }, 
+      { status: 500 }
+    );
   }
 }
