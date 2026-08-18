@@ -1,8 +1,50 @@
 "use client";
 
 import SoftAurora from "@/components/SoftAurora";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { onAuthStateChanged } from "firebase/auth";
+
+// I-IMPORT ANG FIREBASE AUTH FUNCTIONS
+import { auth } from "@/lib/firebase"; 
 
 export default function LogoutPage() {
+
+  const router = useRouter();
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
+
+  // =========================================================================
+  // AUTO-REDIRECT KUNG NAKA-LOG IN NA DAAN ANG USER
+  // =========================================================================
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        // Kung naka-log in na, ayaw na i-pakita ang login page, idiretso sa home/chat
+        router.push('/home');
+      } else {
+        // Kung wala, padayunon pagpakita ang login landing page
+        setIsCheckingSession(false);
+      }
+    });
+
+    
+
+    
+
+    return () => unsubscribe();
+  }, [router]);
+
+
+  // Samtang naga-check pa sa session sa Firebase, ipakita muna ang loading screen
+  if (isCheckingSession) {
+    return (
+      <div className="h-[100dvh] w-full bg-[#0a0a0e] flex flex-col items-center justify-center text-white gap-3">
+        <span className="loading loading-spinner loading-md text-pink-500"></span>
+        <p className="text-xs text-white/50 tracking-wider uppercase">Checking session...</p>
+      </div>
+    );
+  }
+
   return (
     <main className="relative h-[100dvh] w-full overflow-hidden bg-[#0a0a0e] flex items-center justify-center font-sans text-white px-4">
       

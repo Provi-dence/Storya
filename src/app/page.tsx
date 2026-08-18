@@ -1,57 +1,149 @@
 "use client"; 
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import SoftAurora from "@/components/SoftAurora";
 import BorderGlow from "@/components/BorderGlow";
+
+// I-IMPORT ANG FIREBASE AUTH FUNCTIONS
+import { auth } from "@/lib/firebase"; 
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged } from "firebase/auth";
 
 export default function Home() {
   const router = useRouter();
   
   // States para sa flow
   const [isLoading, setIsLoading] = useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [senderEmail, setSenderEmail] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
+  
+  // State para ma-store ang tinuod nga nag-usab-usab nga OTP
+  const [generatedOTP, setGeneratedOTP] = useState("");
   
   // State para sa Modal Steps: 'email' o kaya 'code'
   const [modalStep, setModalStep] = useState<'email' | 'code'>('email');
 
-  // Step 1: I-send ang email para ma-trigger ang code
-  const handleRequestCode = (e: React.FormEvent) => {
+  // State para sa Glowing Toast Notification (ReactBits Style)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showCustomToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 4000);
+  };
+
+  // =========================================================================
+  // AUTO-REDIRECT KUNG NAKA-LOG IN NA DAAN ANG USER
+  // =========================================================================
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        router.push('/home');
+      } else {
+        setIsCheckingSession(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router]);
+
+  // Step 1: I-generate ang dynamic OTP ug i-send sa Backend (Nodemailer)
+  const handleRequestCode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!senderEmail) return;
     
     setIsLoading(true);
     
-    setTimeout(() => {
+    const newOTP = Math.floor(100000 + Math.random() * 900000).toString();
+    setGeneratedOTP(newOTP);
+    
+    try {
+      const response = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: senderEmail, code: newOTP }),
+      });
+
+      if (response.ok) {
+        setModalStep('code');
+        showCustomToast("Secure login code sent to your email!", "success");
+      } else {
+        showCustomToast("Napakyas sa pag-send sa email. I-check ang console.", "error");
+      }
+    } catch (error) {
+      console.error("Fetch error:", error);
+      showCustomToast("Something went wrong!", "error");
+    } finally {
       setIsLoading(false);
-      setModalStep('code');
-    }, 1200);
+    }
   };
 
-  // Step 2: I-verify ang gi-enter nga code
-  const handleVerifyCode = (e: React.FormEvent) => {
+  // Step 2: I-verify ang OTP usa pa isulod sa Firebase
+  const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!verificationCode) return;
     
-    setIsLoading(true);
+    if (!verificationCode || verificationCode.length < 6) return;
     
-    setTimeout(() => {
-      setIsLoading(false);
-      
-      const modal = document.getElementById('login_modal') as HTMLDialogElement;
-      modal?.close();
+    if (verificationCode !== generatedOTP) {
+      showCustomToast("Sayop ang OTP nga imong gi-enter. Palihug sulayi usab.", "error");
+      return;
+    }
 
-      router.push('/home');
-    }, 1200);
+    setIsLoading(true);
+    const dummyPassword = `${senderEmail}-MonCherSecretAuth2026!`;
+
+    try {
+      await signInWithEmailAndPassword(auth, senderEmail, dummyPassword);
+      
+      showCustomToast("Successfully logged in! Redirecting...", "success");
+      
+      setTimeout(() => {
+        setIsLoading(false);
+        const modal = document.getElementById('login_modal') as HTMLDialogElement;
+        modal?.close();
+        router.push('/home');
+      }, 1000);
+
+    } catch (error: any) {
+      try {
+        await createUserWithEmailAndPassword(auth, senderEmail, dummyPassword);
+        
+        showCustomToast("Account created & successfully logged in!", "success");
+        
+        setTimeout(() => {
+          setIsLoading(false);
+          const modal = document.getElementById('login_modal') as HTMLDialogElement;
+          modal?.close();
+          router.push('/home');
+        }, 1000);
+
+      } catch (createError: any) {
+        setIsLoading(false);
+        console.error("Firebase Auth Error:", createError.message);
+        showCustomToast("Nag-error ang Firebase. Palihug sulayi usab.", "error");
+      }
+    }
   };
+
+  // Samtang naga-check pa sa session sa Firebase, ipakita muna ang loading screen
+  if (isCheckingSession) {
+    return (
+      <div className="h-[100dvh] w-full bg-[#0a0a0e] flex flex-col items-center justify-center text-white gap-3">
+        <span className="loading loading-spinner loading-md text-pink-500"></span>
+        <p className="text-xs text-white/50 tracking-wider uppercase">Checking session...</p>
+      </div>
+    );
+  }
 
   // Reset modal state kung i-close
   const resetModal = () => {
     setModalStep('email');
     setSenderEmail("");
     setVerificationCode("");
+    setGeneratedOTP("");
   };
 
   return (
@@ -72,6 +164,8 @@ export default function Home() {
           scale={1.5}
         />
       </div>
+
+      
 
       {/* 2. FOREGROUND CONTENT */}
       <div className="hero relative z-10 w-full px-4 sm:px-6 md:px-8 py-6">
@@ -133,7 +227,45 @@ export default function Home() {
       </div>
 
       {/* ================= AUTHENTICATION MODAL ================= */}
-      <dialog id="login_modal" className="modal modal-bottom sm:modal-middle backdrop-blur-md bg-black/40" onClose={resetModal}>
+      <dialog id="login_modal" className="modal modal-bottom sm:modal-middle backdrop-blur-md bg-black/40 " onClose={resetModal}>
+
+        {/* ================= GLOWING TOAST NOTIFICATION (REACTBITS STYLE - TOP LAYER Z-50) ================= */}
+        
+        <div className="fixed top-6 z-[9999] px-4 w-full max-w-md pointer-events-none flex justify-center">
+          <AnimatePresence>
+            {toast && (
+              <motion.div
+                initial={{ opacity: 0, y: -20, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -20, scale: 0.9 }}
+                transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                className="pointer-events-auto w-full shadow-2xl"
+              >
+                <BorderGlow
+                  edgeSensitivity={30}
+                  glowColor={toast.type === 'success' ? "80 200 120" : "220 60 80"}
+                  backgroundColor="#120F17" 
+                  borderRadius={16} 
+                  glowRadius={50}
+                  glowIntensity={1.2}
+                  coneSpread={40}
+                  animated={true}
+                  colors={toast.type === 'success' ? ['#4ade80', '#38bdf8', '#c084fc'] : ['#f87171', '#fb923c', '#f472b6']}
+                >
+                  <div className="px-5 py-3.5 flex items-center gap-3 w-full bg-[#120F17]/90 backdrop-blur-xl rounded-2xl">
+                    <span className="text-lg">
+                      {toast.type === 'success' ? '✨' : '⚠️'}
+                    </span>
+                    <p className="text-sm font-medium text-white/90">
+                      {toast.message}
+                    </p>
+                  </div>
+                </BorderGlow>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
         <div className="modal-box bg-[#120F17] border border-white/10 border-b-0 sm:border-b-white/10 text-white shadow-2xl rounded-t-[2rem] rounded-b-none sm:rounded-3xl p-6 sm:p-8">
           
           <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-6 sm:hidden"></div>
@@ -244,6 +376,10 @@ export default function Home() {
           <button onClick={resetModal}>close</button>
         </form>
       </dialog>
+
+
+
+      
     
     </main>
   );

@@ -1,9 +1,13 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import SoftAurora from "@/components/SoftAurora";
 import { useRouter } from "next/navigation";
+
+// I-IMPORT ANG FIREBASE AUTH FUNCTIONS
+import { auth } from "@/lib/firebase";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 
 interface Message {
   id: number;
@@ -25,6 +29,10 @@ interface Conversation {
 
 export default function ChatPage() {
   const router = useRouter();
+
+  // Session & Loading States
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
+  const [isSessionLoading, setIsSessionLoading] = useState(true);
 
   // Modal States
   const [recipientEmail, setRecipientEmail] = useState("");
@@ -57,6 +65,24 @@ export default function ChatPage() {
 
   const [activeChatId, setActiveChatId] = useState<number | string | null>(null); 
   const [inputMessage, setInputMessage] = useState("");
+
+  // =========================================================================
+  // FIREBASE SESSION LISTENER (Proteksyon sa Page)
+  // =========================================================================
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        // Naka-log in ang user, kuhaon nato ang email
+        setCurrentUserEmail(user.email);
+        setIsSessionLoading(false);
+      } else {
+        // Walay naka-log in, i-redirect pabalik sa landing/login page (/)
+        router.push("/");
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router]);
 
   const handleStartConversation = (e: React.FormEvent) => {
     e.preventDefault();
@@ -157,15 +183,33 @@ export default function ChatPage() {
     }
   };
 
-  const handleLogout = () => {
-    setIsProfileOpen(false);
-    router.push('/logout');
+  // =========================================================================
+  // LOGOUT HANDLER (Firebase SignOut + Redirect)
+  // =========================================================================
+  const handleLogout = async () => {
+    try {
+      setIsProfileOpen(false);
+      await signOut(auth); // Limpyohan ang session sa Firebase
+      router.push('/logout');
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
   };
 
   const handleAddSenderEmail = () => {
     setIsProfileOpen(false);
     alert("Prototype: Feature to add extra sender email addresses.");
   };
+
+  // Kung nag-load pa ang session check, ipakita muna ang loading screen
+  if (isSessionLoading) {
+    return (
+      <div className="h-[100dvh] w-full bg-[#0a0a0e] flex flex-col items-center justify-center text-white gap-3">
+        <span className="loading loading-spinner loading-md text-pink-500"></span>
+        <p className="text-xs text-white/50 tracking-wider uppercase">Loading session...</p>
+      </div>
+    );
+  }
 
   const activeConversation = conversations.find(c => c.id === activeChatId);
 
@@ -302,7 +346,7 @@ export default function ChatPage() {
                     <li className="pointer-events-none mb-1 w-full">
                       <div className="flex flex-col items-center justify-center w-full px-2 py-2">
                         <span className="font-bold text-base text-white truncate">Junwell Alonzo</span>
-                        <span className="text-xs text-white/50 truncate">junwell@email.com</span>
+                        <span className="text-xs text-white/50 truncate">{currentUserEmail || "junwell@email.com"}</span>
                       </div>
                     </li>
                     <div className="h-px w-full bg-white/10 my-1"></div>
@@ -366,7 +410,7 @@ export default function ChatPage() {
           <div className="w-10"></div>
         </header>
 
-        {/* Chat Messages / Welcome Area (Gibalhin sa limpyong flex container aron matangtang ang DaisyUI triangle pointers) */}
+        {/* Chat Messages / Welcome Area */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col gap-4 max-w-3xl w-full mx-auto justify-center">
           {activeChatId !== null && activeConversation ? (
             activeConversation.messages.map((msg) => (
