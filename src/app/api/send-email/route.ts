@@ -6,19 +6,16 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
-    const { email, code } = await req.json();
+    const { email, code, subject, htmlContent, inviteLink, inviterEmail } = await req.json();
 
     // Validate request body
-    if (!email || !code) {
+    if (!email) {
       return NextResponse.json(
-        {
-          success: false,
-          error: "Missing email or verification code",
-        },
+        { success: false, error: "Missing email address" },
         { status: 400 }
       );
     }
-
+    
     // Check environment variables updated dapat ingani.
     const runtimeEnvironment = process.env;
 
@@ -77,60 +74,89 @@ export async function POST(req: Request) {
       );
     }
 
-    // Email content
+    // Default OTP HTML template kung wala gihatag ang custom htmlContent
+    const defaultHtml = `
+      <div style="
+        font-family: sans-serif;
+        text-align: center;
+        padding: 30px;
+        background-color: #0a0a0e;
+        color: #ffffff;
+        border-radius: 12px;
+        max-width: 400px;
+        margin: auto;
+        border: 1px solid #333;
+      ">
+        <h2 style="
+          color: #f472b6;
+          margin-bottom: 5px;
+        ">
+          MON CHER
+        </h2>
+
+        <p style="
+          font-size: 14px;
+          color: #aaaaaa;
+          margin-bottom: 25px;
+        ">
+          Here is your secure login code:
+        </p>
+
+        <div style="
+          font-size: 32px;
+          font-weight: bold;
+          letter-spacing: 8px;
+          color: #ffffff;
+          background-color: #1a1a24;
+          padding: 15px 20px;
+          border-radius: 8px;
+          display: inline-block;
+        ">
+          ${code}
+        </div>
+
+        <p style="
+          font-size: 12px;
+          color: #666666;
+          margin-top: 30px;
+        ">
+          Safe travels through the digital walls.
+        </p>
+      </div>
+    `;
+
+    // Invitation HTML Template kung naay inviteLink nga gi-pasa
+    const inviteHtml = `
+      <div style="font-family: sans-serif; text-align: center; padding: 30px; background-color: #0a0a0e; color: #ffffff; border-radius: 12px; max-width: 400px; margin: auto; border: 1px solid #333;">
+        <h2 style="color: #f472b6; margin-bottom: 5px;">MON CHER</h2>
+        <p style="font-size: 14px; color: #aaaaaa; margin-bottom: 20px;">
+          <b>${inviterEmail || "Someone"}</b> wants to connect with you!
+        </p>
+        <a href="${inviteLink}" style="display: inline-block; background: linear-gradient(to right, #9333ea, #db2777); color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 15px;">
+          Accept & Open Chat
+        </a>
+        <p style="font-size: 11px; color: #666666; margin-top: 25px;">
+          Safe travels through the digital walls.
+        </p>
+      </div>
+    `;
+
+    // Email content selection
+    let finalSubject = subject || "Your Secure Login OTP";
+    let finalHtml = htmlContent;
+
+    if (inviteLink) {
+      finalSubject = `${inviterEmail || "Someone"} invited you to chat on Mon Cher`;
+      finalHtml = inviteHtml;
+    } else if (!finalHtml) {
+      finalHtml = defaultHtml;
+    }
+
     const mailOptions = {
       from: `"MON CHER" <${emailUser}>`,
       to: email,
-      subject: "Your Secure Login OTP",
-      html: `
-        <div style="
-          font-family: sans-serif;
-          text-align: center;
-          padding: 30px;
-          background-color: #0a0a0e;
-          color: #ffffff;
-          border-radius: 12px;
-          max-width: 400px;
-          margin: auto;
-          border: 1px solid #333;
-        ">
-          <h2 style="
-            color: #f472b6;
-            margin-bottom: 5px;
-          ">
-            MON CHER
-          </h2>
-
-          <p style="
-            font-size: 14px;
-            color: #aaaaaa;
-            margin-bottom: 25px;
-          ">
-            Here is your secure login code:
-          </p>
-
-          <div style="
-            font-size: 32px;
-            font-weight: bold;
-            letter-spacing: 8px;
-            color: #ffffff;
-            background-color: #1a1a24;
-            padding: 15px 20px;
-            border-radius: 8px;
-            display: inline-block;
-          ">
-            ${code}
-          </div>
-
-          <p style="
-            font-size: 12px;
-            color: #666666;
-            margin-top: 30px;
-          ">
-            Safe travels through the digital walls.
-          </p>
-        </div>
-      `,
+      subject: finalSubject,
+      html: finalHtml,
     };
 
     // Send email

@@ -11,6 +11,8 @@ import { auth } from "@/lib/firebase";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged } from "firebase/auth";
 
 export default function Home() {
+
+  
   const router = useRouter();
   
   // States para sa flow
