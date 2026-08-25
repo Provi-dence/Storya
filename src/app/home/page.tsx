@@ -6,13 +6,6 @@ import SoftAurora from "@/components/SoftAurora";
 import { useRouter } from "next/navigation";
 import BorderGlow from "@/components/BorderGlow";
 
-// I-IMPORT ANG FIREBASE DB (Wala na ta magsalig sa client auth para iwas firewall block)
-import { db } from "@/lib/firebase";
-import { 
-  collection, query, where, onSnapshot, 
-  addDoc, updateDoc, doc, arrayUnion, getDoc, setDoc, getDocs
-} from "firebase/firestore";
-
 interface Message {
   id: number;
   sender: string;
@@ -47,6 +40,24 @@ const getTimeAgo = (timestamp: number) => {
   interval = seconds / 60;
   if (interval > 1) return Math.floor(interval) + "m ago";
   return "Just now";
+};
+
+const getActiveStatusText = (lastActive?: number, isOnline?: boolean) => {
+  if (!lastActive) return "Offline";
+  const seconds = Math.floor((Date.now() - lastActive) / 1000);
+  
+  if (seconds < 35 && isOnline) return "Online";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `Active ${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Active ${hours}h ago`;
+  return "Offline";
+};
+
+const checkIsUserOnline = (lastActive?: number, isOnline?: boolean) => {
+  if (!lastActive) return false;
+  const seconds = Math.floor((Date.now() - lastActive) / 1000);
+  return seconds < 35 && (isOnline !== false);
 };
 
 export default function ChatPage() {
@@ -92,8 +103,8 @@ export default function ChatPage() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null); 
   const [inputMessage, setInputMessage] = useState("");
 
-  // Store para sa online status ug displayName sa tanang users
-  const [usersData, setUsersData] = useState<{ [email: string]: { isOnline: boolean; displayName: string } }>({});
+  // Users Presence Map Store
+  const [usersPresence, setUsersPresence] = useState<{ [email: string]: { isOnline: boolean; lastActive: number; displayName: string } }>({});
 
   // Auto-scroll effect
   const activeConversation = conversations.find(c => c.id === activeChatId);
@@ -103,17 +114,55 @@ export default function ChatPage() {
     }
   }, [activeConversation?.messages]);
 
-  // Active chat read reset effect
+  const lastCheckedMessageId = useRef<number | null>(null);
+  const lastCheckedReactionTime = useRef<number | null>(null);
+
+  // HEARTBEAT PING (Matag 10 segundos)
+  useEffect(() => {
+    if (!currentUserEmail) return;
+    const sendHeartbeat = () => {
+      fetch('/api/presence', { method: 'POST' }).catch(() => {});
+    };
+    sendHeartbeat();
+    const heartbeatInterval = setInterval(sendHeartbeat, 10000);
+    return () => clearInterval(heartbeatInterval);
+  }, [currentUserEmail]);
+
+  // FETCH USERS PRESENCE MAP (Matag 5 segundos)
+  useEffect(() => {
+    if (!currentUserEmail) return;
+    const fetchPresence = async () => {
+      try {
+        const res = await fetch('/api/presence');
+        const data = await res.json();
+        if (res.ok && data.success && data.users) {
+          const map: any = {};
+          data.users.forEach((u: any) => {
+            map[u.email.toLowerCase().trim()] = {
+              isOnline: u.isOnline,
+              lastActive: u.lastActive,
+              displayName: u.displayName
+            };
+          });
+          setUsersPresence(map);
+        }
+      } catch (err) {}
+    };
+    fetchPresence();
+    const interval = setInterval(fetchPresence, 5000);
+    return () => clearInterval(interval);
+  }, [currentUserEmail]);
+
+  // Active chat read reset effect via API
   useEffect(() => {
     if (activeChatId && currentUserEmail) {
-      const chatRef = doc(db, "chats", activeChatId);
-      const emailKey = currentUserEmail.toLowerCase().trim();
-      updateDoc(chatRef, {
-        [`unreadCounts.${emailKey}`]: 0
+      fetch('/api/chats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reset_unread', chatId: activeChatId })
       }).catch(() => {});
     }
   }, [activeChatId, currentUserEmail]);
-
 
   // ==========================================
   // GLOWING TOAST NOTIFICATION STATES
@@ -130,7 +179,6 @@ export default function ChatPage() {
   const lastNotifiedMessageId = useRef<number | null>(null);
   const lastNotifiedReactionTime = useRef<number | null>(null);
   
-  // Mangayo og permission sa browser para sa background/cross-tab notifications
   useEffect(() => {
     if (typeof window !== "undefined" && "Notification" in window) {
       if (Notification.permission === "default") {
@@ -139,7 +187,6 @@ export default function ChatPage() {
     }
   }, []);
 
-  // Auto-hide sa Glowing Toast after 7 seconds
   useEffect(() => {
     if (toastNotification?.show) {
       const timer = setTimeout(() => setToastNotification(null), 7000);
@@ -147,10 +194,8 @@ export default function ChatPage() {
     }
   }, [toastNotification]);
 
-  // 1-Minute Timer countdown para sa Incoming Invite Toaster
   useEffect(() => {
     if (!incomingInvite) return;
-
     const timer = setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
@@ -161,203 +206,140 @@ export default function ChatPage() {
         return prev - 1;
       });
     }, 1000);
-
     return () => clearInterval(timer);
   }, [incomingInvite]);
 
   // =========================================================================
-  // 1. COOKIE-BASED SESSION INITIALIZER (Bypasses Office Firewall)
+  // 1. SECURE API-BASED SESSION CHECKER
   // =========================================================================
   useEffect(() => {
-    try {
-      const cookiesList = document.cookie.split(';');
-      const sessionCookie = cookiesList.find(row => row.trim().startsWith('moncher_session_email='));
-      
-      if (sessionCookie) {
-        const emailFromCookie = sessionCookie.split('=')[1];
-        const decodedEmail = decodeURIComponent(emailFromCookie);
-        
-        console.log("✅ Valid session cookie found for:", decodedEmail);
+    async function verifySession() {
+      try {
+        const res = await fetch('/api/check-session');
+        const data = await res.json();
 
-        setCurrentUserEmail(decodedEmail);
-        setCurrentUid("cookie-user-id");
-        setCurrentDisplayName(decodedEmail.split('@')[0]);
-        setDisplayNameInput(decodedEmail.split('@')[0]);
-        setIsSessionLoading(false);
-      } else {
-        console.warn("⚠️ No session cookie found! Redirecting to login...");
+        if (res.ok && data.authenticated && data.email) {
+          setCurrentUserEmail(data.email);
+          setCurrentUid("cookie-user-id");
+          setCurrentDisplayName(data.email.split('@')[0]);
+          setDisplayNameInput(data.email.split('@')[0]);
+          setIsSessionLoading(false);
+        } else {
+          router.push("/");
+        }
+      } catch (err) {
+        console.error("Session verification error:", err);
         router.push("/");
       }
-    } catch (err) {
-      console.error("❌ Session load error:", err);
-      router.push("/");
     }
+
+    verifySession();
   }, [router]);
 
-  // =========================================================================
-  // 2. LISTEN TO ALL USERS (Online Status + Display Name)
-  // =========================================================================
-  useEffect(() => {
-    if (!currentUserEmail) return;
-
-    const usersQuery = query(collection(db, "users"));
-    const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
-      const dataMap: { [email: string]: { isOnline: boolean; displayName: string } } = {};
-      
-      snapshot.docs.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.email) {
-          dataMap[data.email.toLowerCase()] = {
-            isOnline: data.isOnline || false,
-            displayName: data.displayName || data.email.split('@')[0]
-          };
-        }
-      });
-      
-      setUsersData(dataMap);
-    }, (error) => {
-      if (error.code !== 'permission-denied') {
-        console.error("Users snapshot error:", error);
-      }
-    });
-
-    return () => unsubscribeUsers();
-  }, [currentUserEmail]);
 
   // =========================================================================
-  // 3. FIRESTORE REAL-TIME CHATS LISTENER
+  // FETCH CHATS & TRIGGER TOASTER NOTIFICATIONS (Messages & Reactions)
   // =========================================================================
   useEffect(() => {
+    
     if (!currentUserEmail) return;
 
-    const q = query(
-      collection(db, "chats"),
-      where("participants", "array-contains", currentUserEmail)
-    );
+    const fetchChats = async () => {
+      try {
+        const res = await fetch('/api/chats');
+        const data = await res.json();
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedChats: Conversation[] = [];
+        if (res.ok && data.success) {
+          const fetchedChats: Conversation[] = data.chats.map((chat: any) => {
+            const otherEmail = chat.participants.find((e: string) => e !== currentUserEmail) || chat.participants[0];
+            const rawAssignedName = chat.names?.[otherEmail] || otherEmail;
+            
+            const userUnreadMap = chat.unreadCounts || {};
+            const emailKey = currentUserEmail.toLowerCase().trim();
+            const myUnreadCount = userUnreadMap[emailKey] || 0;
 
-      // ==========================================================
-      // CHECK FOR NEW MESSAGES & REACTIONS (Para sa Notifications & Toast)
-      // ==========================================================
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === "modified") {
-          const data = change.doc.data();
-          const otherEmail = data.participants.find((e: string) => e !== currentUserEmail) || data.participants[0];
-          const peerInfo = usersData[otherEmail.toLowerCase()];
-          const senderName = peerInfo ? peerInfo.displayName : otherEmail;
+            const messages = chat.messages || [];
+            const lastMsg = messages[messages.length - 1];
 
-          // A. CHECK FOR NEW MESSAGES
-          const msgs = data.messages || [];
-          const lastMsg = msgs[msgs.length - 1];
+            
 
-          if (lastMsg && lastMsg.sender !== currentUserEmail) {
-            if (lastNotifiedMessageId.current !== lastMsg.id) {
-              lastNotifiedMessageId.current = lastMsg.id; 
-              
-              setToastNotification({ 
-                show: true, 
-                sender: senderName, 
-                message: lastMsg.text,
-                id: lastMsg.id,
-                isReaction: false
-              });
-
-              if (document.hidden && "Notification" in window && Notification.permission === "granted") {
-                new Notification(`New message from ${senderName}`, {
-                  body: lastMsg.text,
+            // 1. CHECK FOR NEW INCOMING MESSAGES TOASTER
+            if (lastMsg && lastMsg.sender !== currentUserEmail) {
+              if (lastCheckedMessageId.current !== lastMsg.id && activeChatId !== chat.id) {
+                lastCheckedMessageId.current = lastMsg.id;
+                setToastNotification({
+                  show: true,
+                  sender: rawAssignedName,
+                  message: lastMsg.text,
+                  id: lastMsg.id,
+                  isReaction: false
                 });
               }
             }
-          }
 
-          // B. CHECK FOR NEW REACTIONS
-          const reactionData = data.latestReaction;
-          if (reactionData && reactionData.emoji !== "" && reactionData.reactor !== currentUserEmail) {
-            if (lastNotifiedReactionTime.current !== reactionData.timestamp) {
-              lastNotifiedReactionTime.current = reactionData.timestamp;
-
-              setToastNotification({
-                show: true,
-                sender: senderName,
-                message: `reacted to your message "${reactionData.messageText}"`,
-                id: reactionData.timestamp,
-                isReaction: true,
-                emoji: reactionData.emoji
-              });
-
-              if (document.hidden && "Notification" in window && Notification.permission === "granted") {
-                new Notification(`${senderName} reacted ${reactionData.emoji}`, {
-                  body: `to your message "${reactionData.messageText}"`,
+            // 2. CHECK FOR NEW REACTIONS TOASTER
+            const reactionData = chat.latestReaction;
+            if (reactionData && reactionData.emoji && reactionData.emoji !== "" && reactionData.reactor !== currentUserEmail) {
+              if (lastCheckedReactionTime.current !== reactionData.timestamp) {
+                lastCheckedReactionTime.current = reactionData.timestamp;
+                setToastNotification({
+                  show: true,
+                  sender: rawAssignedName,
+                  message: `reacted to your message "${reactionData.messageText || ''}"`,
+                  id: reactionData.timestamp,
+                  isReaction: true,
+                  emoji: reactionData.emoji
                 });
               }
             }
-          }
-        }
-      });
-      
-      snapshot.docs.forEach(docSnap => {
-        const data = docSnap.data();
-        const otherEmail = data.participants.find((e: string) => e !== currentUserEmail) || data.participants[0];
-        
-        const peerInfo = usersData[otherEmail.toLowerCase()];
-        const rawAssignedName = data.names?.[otherEmail];
-        
-        let displayName = otherEmail;
-        if (peerInfo && peerInfo.displayName) {
-          displayName = peerInfo.displayName;
-        } else if (rawAssignedName && rawAssignedName !== "You") {
-          displayName = rawAssignedName;
-        }
 
-        const isPeerOnline = peerInfo ? peerInfo.isOnline : false;
-        
-        const userUnreadMap = data.unreadCounts || {};
-        const emailKey = currentUserEmail.toLowerCase().trim();
-        const myUnreadCount = userUnreadMap[emailKey] || 0;
+            // Makuha ang sakto nga presence sa uban gikan sa usersPresence state map
+            const cleanOtherEmail = otherEmail.toLowerCase().trim();
+            const peerPresence = usersPresence[cleanOtherEmail];
+            const peerOnline = peerPresence ? checkIsUserOnline(peerPresence.lastActive, peerPresence.isOnline) : false;
+            const peerLastActive = peerPresence ? peerPresence.lastActive : undefined;
 
-        const chatItem: Conversation = {
-          id: docSnap.id,
-          name: displayName,
-          email: otherEmail,
-          lastMessage: data.lastMessage || "",
-          time: data.time || "",
-          updatedAt: data.updatedAt || 0,
-          isOnline: isPeerOnline, 
-          status: data.status || "accepted",
-          invitedBy: data.invitedBy || "",
-          messages: data.messages || [],
-          unreadCount: myUnreadCount
-        };
-
-        if (data.status === "pending" && data.invitedBy !== currentUserEmail) {
-          setIncomingInvite({
-            chatId: docSnap.id,
-            inviterName: data.names?.[data.invitedBy] || data.invitedBy,
-            inviterEmail: data.invitedBy
+            return {
+              id: chat.id,
+              name: rawAssignedName,
+              email: otherEmail,
+              lastMessage: chat.lastMessage || "",
+              time: chat.time || "",
+              updatedAt: chat.updatedAt || 0,
+              isOnline: peerOnline,
+              lastActive: peerLastActive,
+              status: chat.status || "accepted",
+              invitedBy: chat.invitedBy || "",
+              messages: messages,
+              unreadCount: myUnreadCount
+            };
           });
-          setTimeLeft(60);
-        }
 
-        if (chatItem.status === "accepted" || docSnap.id === activeChatId) {
-          fetchedChats.push(chatItem);
-        }
-      });
+          fetchedChats.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+          setConversations(fetchedChats);
 
-      fetchedChats.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-      setConversations(fetchedChats);
-    }, (error) => {
-      if (error.code !== 'permission-denied') {
-        console.error("Firestore snapshot error:", error);
+          const pending = fetchedChats.find(c => c.status === "pending" && c.invitedBy !== currentUserEmail);
+          if (pending) {
+            setIncomingInvite({
+              chatId: pending.id,
+              inviterName: pending.name,
+              inviterEmail: pending.email
+            });
+            setTimeLeft(60);
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching chats via API:", error);
       }
-    });
+    };
 
-    return () => unsubscribe();
-  }, [currentUserEmail, activeChatId, usersData]);
+    fetchChats();
+    const interval = setInterval(fetchChats, 3500);
+    return () => clearInterval(interval);
+  }, [currentUserEmail, activeChatId]);
 
   // =========================================================================
-  // 4. START NEW CONVERSATION
+  // 3. START NEW CONVERSATION VIA API
   // =========================================================================
   const handleStartConversation = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -367,48 +349,40 @@ export default function ChatPage() {
 
     try {
       const formattedRecipientEmail = recipientEmail.toLowerCase().trim();
-      const currentTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       
-      const newChatData = {
-        participants: [currentUserEmail, formattedRecipientEmail],
-        names: {
-          [currentUserEmail]: currentDisplayName || currentUserEmail,
-          [formattedRecipientEmail]: recipientName
-        },
-        status: "pending", 
-        invitedBy: currentUserEmail,
-        lastMessage: initialMessage || "Sent a conversation invite...",
-        time: currentTimeStr,
-        updatedAt: Date.now(),
-        messages: initialMessage ? [{
-          id: Date.now(),
-          sender: currentUserEmail,
-          text: initialMessage,
-          time: currentTimeStr
-        }] : [],
-        unreadCounts: {}
-      };
-
-      const docRef = await addDoc(collection(db, "chats"), newChatData);
-      setActiveChatId(docRef.id);
-
-      const inviteLink = `${window.location.origin}/home?email=${encodeURIComponent(formattedRecipientEmail)}&chatId=${docRef.id}`;
-      
-      await fetch("/api/send-email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/chats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: formattedRecipientEmail,
-          inviteLink: inviteLink,
-          inviterEmail: currentUserEmail
-        }),
+          action: 'start_chat',
+          recipientEmail: formattedRecipientEmail,
+          recipientName,
+          initialMessage
+        })
       });
-      
-      const modal = document.getElementById('new_chat_modal') as HTMLDialogElement;
-      modal?.close();
-      setRecipientEmail("");
-      setRecipientName("");
-      setInitialMessage("");
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setActiveChatId(data.chatId);
+
+        const inviteLink = `${window.location.origin}/home?email=${encodeURIComponent(formattedRecipientEmail)}&chatId=${data.chatId}`;
+        
+        await fetch("/api/send-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: formattedRecipientEmail,
+            inviteLink: inviteLink,
+            inviterEmail: currentUserEmail
+          }),
+        });
+        
+        const modal = document.getElementById('new_chat_modal') as HTMLDialogElement;
+        modal?.close();
+        setRecipientEmail("");
+        setRecipientName("");
+        setInitialMessage("");
+      }
     } catch (error) {
       console.error("Error creating chat invite:", error);
     } finally {
@@ -419,10 +393,10 @@ export default function ChatPage() {
   const handleAcceptInvite = async () => {
     if (!incomingInvite || !currentUserEmail) return;
     try {
-      const chatRef = doc(db, "chats", incomingInvite.chatId);
-      await updateDoc(chatRef, { 
-        status: "accepted", 
-        updatedAt: Date.now() 
+      await fetch('/api/chats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_status', chatId: incomingInvite.chatId, status: 'accepted' })
       });
       setActiveChatId(incomingInvite.chatId);
       setIncomingInvite(null);
@@ -434,10 +408,10 @@ export default function ChatPage() {
   const handleRejectInvite = async () => {
     if (!incomingInvite) return;
     try {
-      const chatRef = doc(db, "chats", incomingInvite.chatId);
-      await updateDoc(chatRef, { 
-        status: "rejected", 
-        updatedAt: Date.now() 
+      await fetch('/api/chats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_status', chatId: incomingInvite.chatId, status: 'rejected' })
       });
       setIncomingInvite(null);
     } catch (error) {
@@ -447,7 +421,7 @@ export default function ChatPage() {
   };
 
   // =========================================================================
-  // UPDATE DISPLAY NAME (Gamit ang Firestore Users collection imbes auth profile)
+  // UPDATE DISPLAY NAME VIA API
   // =========================================================================
   const handleUpdateDisplayName = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -458,40 +432,11 @@ export default function ChatPage() {
 
     try {
       const newName = displayNameInput.trim();
-
-      // I-update sa users collection base sa email
-      const userQuery = query(collection(db, "users"), where("email", "==", currentUserEmail));
-      const userSnap = await getDocs(userQuery);
-      
-      if (!userSnap.empty) {
-        const userDocRef = userSnap.docs[0].ref;
-        await updateDoc(userDocRef, {
-          displayName: newName,
-          lastUpdatedName: Date.now()
-        });
-      } else {
-        const userDocRef = doc(collection(db, "users"));
-        await setDoc(userDocRef, {
-          email: currentUserEmail,
-          displayName: newName,
-          isOnline: true,
-          lastUpdatedName: Date.now()
-        });
-      }
-
-      const chatsQuery = query(
-        collection(db, "chats"), 
-        where("participants", "array-contains", currentUserEmail)
-      );
-      const querySnapshot = await getDocs(chatsQuery);
-
-      const updatePromises = querySnapshot.docs.map(async (chatDoc) => {
-        return updateDoc(chatDoc.ref, {
-          [`names.${currentUserEmail}`]: newName
-        });
+      await fetch('/api/chats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_display_name', displayName: newName })
       });
-
-      await Promise.all(updatePromises);
 
       setCurrentDisplayName(newName);
       setNameUpdateMessage("Name updated successfully!");
@@ -505,49 +450,25 @@ export default function ChatPage() {
   };
 
   // =========================================================================
-  // SEND MESSAGE
+  // SEND MESSAGE VIA API
   // =========================================================================
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputMessage.trim() || !activeChatId || !currentUserEmail) return;
 
-    const currentTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const newMessage: Message = {
-      id: Date.now(),
-      sender: currentUserEmail,
-      text: inputMessage,
-      time: currentTimeStr
-    };
-
+    const textToSend = inputMessage;
     setInputMessage("");
 
     try {
-      const chatRef = doc(db, "chats", activeChatId);
-      const chatSnap = await getDoc(chatRef);
-      
-      if (chatSnap.exists()) {
-        const chatData = chatSnap.data();
-        const participants = chatData.participants || [];
-        const otherEmail = participants.find((e: string) => e !== currentUserEmail);
-        
-        const unreadCounts = chatData.unreadCounts || {};
-        
-        if (otherEmail) {
-          const otherKey = otherEmail.toLowerCase().trim();
-          unreadCounts[otherKey] = (unreadCounts[otherKey] || 0) + 1;
-        }
-
-        const myKey = currentUserEmail.toLowerCase().trim();
-        unreadCounts[myKey] = 0;
-
-        await updateDoc(chatRef, {
-          messages: arrayUnion(newMessage),
-          lastMessage: newMessage.text,
-          time: currentTimeStr,
-          updatedAt: Date.now(),
-          unreadCounts: unreadCounts
-        });
-      }
+      await fetch('/api/chats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'send_message',
+          chatId: activeChatId,
+          messageText: textToSend
+        })
+      });
     } catch (error) {
       console.error("Error sending message:", error);
     }
@@ -556,31 +477,16 @@ export default function ChatPage() {
   const handleReactMessage = async (messageId: number, emoji: string) => {
     if (!activeChatId || !currentUserEmail) return;
 
-    const chat = conversations.find(c => c.id === activeChatId);
-    if (!chat) return;
-
-    let reactedMessageText = "";
-    let newReaction = "";
-
-    const updatedMessages = chat.messages.map(msg => {
-      if (msg.id === messageId) {
-        newReaction = msg.reaction === emoji ? "" : emoji;
-        reactedMessageText = msg.text;
-        return { ...msg, reaction: newReaction };
-      }
-      return msg;
-    });
-
     try {
-      const chatRef = doc(db, "chats", activeChatId);
-      await updateDoc(chatRef, { 
-        messages: updatedMessages,
-        latestReaction: {
-          emoji: newReaction,
-          reactor: currentUserEmail,
-          messageText: reactedMessageText,
-          timestamp: Date.now()
-        }
+      await fetch('/api/chats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'react_message',
+          chatId: activeChatId,
+          messageId,
+          emoji
+        })
       });
     } catch (error) {
       console.error("Error reacting to message:", error);
@@ -598,13 +504,18 @@ export default function ChatPage() {
 
   const handleLogout = async () => {
     try {
-      // Clear cookie by expiring it immediately
-      document.cookie = "moncher_session_email=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+      // 1. I-update ang presence sa server/database nga offline na siya
+      await fetch('/api/presence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'logout' }) // o kaha i-handle sa API
+      }).catch(() => {});
 
+      // 2. Clear sa session cookie
+      document.cookie = "moncher_session_email=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
       setCurrentUserEmail(null);
       setConversations([]);
       setIsProfileOpen(false);
-
       router.push('/');
     } catch (error) {
       console.error("Logout error:", error);
@@ -696,7 +607,6 @@ export default function ChatPage() {
             >
               <div className="relative p-4 flex items-center z-[9997] gap-4 w-full h-full bg-[#0a0a0e] rounded-[14px]">
                 
-                {/* Avatar with Outer Glow & Reaction Badge */}
                 <div className="relative w-10 h-10 shrink-0">
                   <div className="absolute inset-0 bg-pink-500 blur-md opacity-60 rounded-full animate-pulse"></div>
                   <div className="relative w-10 h-10 rounded-full bg-gradient-to-tr from-purple-500 to-pink-500 flex items-center justify-center font-bold text-white shadow-lg border border-white/20">
@@ -762,14 +672,12 @@ export default function ChatPage() {
       >
         <div className="w-72 h-full flex flex-col p-4 min-w-[18rem] relative">
           
-          {/* ================= APP LOGO (MON CHER) ================= */}
           <div className="flex items-center gap-1.5 px-2 mb-6 mt-1 cursor-default">
             <h1 className="text-4xl font-black tracking-tighter text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.2)]">
               MON CHER
             </h1>
             <div className="w-2.5 h-2.5 rounded-full bg-pink-500 animate-pulse mt-2 shadow-[0_0_12px_rgba(236,72,153,0.8)]"></div>
           </div>
-          {/* ================================================= */}
 
           <button 
             onClick={() => (document.getElementById('new_chat_modal') as HTMLDialogElement)?.showModal()}
@@ -790,17 +698,9 @@ export default function ChatPage() {
               conversations.map((chat) => (
                 <button
                   key={chat.id}
-                  onClick={async () => {
+                  onClick={() => {
                     setActiveChatId(chat.id);
                     if (window.innerWidth < 768) setIsSidebarOpen(false);
-                    
-                    if (currentUserEmail) {
-                      const chatRef = doc(db, "chats", chat.id);
-                      const emailKey = currentUserEmail.toLowerCase().trim();
-                      await updateDoc(chatRef, {
-                        [`unreadCounts.${emailKey}`]: 0
-                      });
-                    }
                   }}
                   className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-all cursor-pointer ${
                     activeChatId === chat.id 
@@ -812,6 +712,7 @@ export default function ChatPage() {
                     <div className="bg-gradient-to-tr from-purple-500 to-pink-500 text-white rounded-full w-10 h-10 text-sm font-bold flex items-center justify-center shadow-md">
                       {chat.name.charAt(0).toUpperCase()}
                     </div>
+                    {/* DYNAMIC SIDEBAR GREEN / GRAY DOT */}
                     <span className={`absolute bottom-0 right-0 w-3 h-3 border-2 border-[#120F17] rounded-full ${
                       chat.isOnline ? "bg-green-500" : "bg-gray-500"
                     }`}></span>
@@ -968,16 +869,18 @@ export default function ChatPage() {
                 <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-500 to-pink-500 flex items-center justify-center text-xs font-bold">
                   {activeConversation.name.charAt(0).toUpperCase()}
                 </div>
+                {/* DYNAMIC HEADER GREEN / GRAY DOT */}
                 <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 border-2 border-[#0a0a0e] rounded-full ${
                   activeConversation.isOnline ? "bg-green-500" : "bg-gray-500"
                 }`}></span>
               </div>
               <div className="flex flex-col min-w-0">
                 <span className="text-sm font-semibold text-white/90 leading-tight truncate">{activeConversation.name}</span>
+                {/* DYNAMIC HEADER STATUS TEXT */}
                 <span className={`text-[10px] font-medium ${
                   activeConversation.isOnline ? "text-green-400" : "text-gray-400"
                 }`}>
-                  {activeConversation.isOnline ? "Online" : "Offline"}
+                  {getActiveStatusText(activeConversation.lastActive, activeConversation.isOnline)}
                 </span>
               </div>
             </div>
