@@ -8,11 +8,9 @@ import BorderGlow from "@/components/BorderGlow";
 
 // I-IMPORT ANG FIREBASE AUTH FUNCTIONS
 import { auth } from "@/lib/firebase"; 
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 
 export default function Home() {
-
-  
   const router = useRouter();
   
   // States para sa flow
@@ -38,7 +36,7 @@ export default function Home() {
   };
 
   // =========================================================================
-  // AUTO-REDIRECT KUNG NAKA-LOG IN NA DAAN ANG USER
+  // AUTO-REDIRECT KUNG NAKA-LOG IN NA DAAN ANG USER (Mo-work rani kung naa sa balay)
   // =========================================================================
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -49,70 +47,49 @@ export default function Home() {
       }
     });
 
-    return () => unsubscribe();
+    // Fallback in case na-block ang identitytoolkit sa firewall, i-stop ang loading
+    const timer = setTimeout(() => setIsCheckingSession(false), 3000);
+
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
   }, [router]);
 
   // Step 1: I-generate ang dynamic OTP ug i-send sa Backend (Nodemailer)
   const handleRequestCode = async (e: React.FormEvent) => {
     e.preventDefault();
-
     if (!senderEmail) return;
 
     setIsLoading(true);
-
     const newOTP = Math.floor(100000 + Math.random() * 900000).toString();
     setGeneratedOTP(newOTP);
 
     try {
-      console.log("📨 Calling /api/send-email...");
-
       const response = await fetch("/api/send-email", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: senderEmail,
-          code: newOTP,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: senderEmail, code: newOTP }),
       });
 
       const data = await response.json();
 
-      console.log("📩 API Response:", {
-        status: response.status,
-        ok: response.ok,
-        data,
-      });
-
       if (!response.ok || !data.success) {
-        throw new Error(
-          data?.error || "Failed to send verification email"
-        );
+        throw new Error(data?.error || "Failed to send verification email");
       }
 
       setModalStep("code");
-
-      showCustomToast(
-        "Secure login code sent to your email!",
-        "success"
-      );
+      showCustomToast("Secure login code sent to your email!", "success");
 
     } catch (error: any) {
       console.error("❌ Send Email Error:", error);
-
-      showCustomToast(
-        error?.message || "Something went wrong!",
-        "error"
-      );
-
+      showCustomToast(error?.message || "Something went wrong!", "error");
     } finally {
       setIsLoading(false);
     }
   };
 
-
-  // Step 2: I-verify ang OTP usa pa isulod sa Firebase
+  // Step 2: I-verify ang OTP ug ipasa sa Proxy Backend para Firewall Bypass
   const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -127,39 +104,43 @@ export default function Home() {
     const dummyPassword = `${senderEmail}-MonCherSecretAuth2026!`;
 
     try {
-      await signInWithEmailAndPassword(auth, senderEmail, dummyPassword);
-      
+
+      console.log("🚀 Sending login request to /api/login...");
+
+      // DIRI NA NATO TAWAGON ANG BACKEND IMbes NGA FIREBASE CLIENT DIRECTLY
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          email: senderEmail, 
+          password: dummyPassword 
+        })
+      });
+
+      const data = await response.json();
+      console.log("📥 API Response received:", response.status, data);
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to authenticate via server.");
+      }
+
       showCustomToast("Successfully logged in! Redirecting...", "success");
       
       setTimeout(() => {
         setIsLoading(false);
         const modal = document.getElementById('login_modal') as HTMLDialogElement;
         modal?.close();
-        router.push('/home');
+        window.location.href = '/home';
       }, 1000);
 
     } catch (error: any) {
-      try {
-        await createUserWithEmailAndPassword(auth, senderEmail, dummyPassword);
-        
-        showCustomToast("Account created & successfully logged in!", "success");
-        
-        setTimeout(() => {
-          setIsLoading(false);
-          const modal = document.getElementById('login_modal') as HTMLDialogElement;
-          modal?.close();
-          router.push('/home');
-        }, 1000);
-
-      } catch (createError: any) {
-        setIsLoading(false);
-        console.error("Firebase Auth Error:", createError.message);
-        showCustomToast("Nag-error ang Firebase. Palihug sulayi usab.", "error");
-      }
+      setIsLoading(false);
+      console.error("Backend Auth Error:", error.message);
+      
+      showCustomToast("Nag-error ang server login. Palihug sulayi usab.", "error");
     }
   };
 
-  // Samtang naga-check pa sa session sa Firebase, ipakita muna ang loading screen
   if (isCheckingSession) {
     return (
       <div className="h-[100dvh] w-full bg-[#0a0a0e] flex flex-col items-center justify-center text-white gap-3">
@@ -169,7 +150,6 @@ export default function Home() {
     );
   }
 
-  // Reset modal state kung i-close
   const resetModal = () => {
     setModalStep('email');
     setSenderEmail("");
@@ -196,14 +176,11 @@ export default function Home() {
         />
       </div>
 
-      
-
       {/* 2. FOREGROUND CONTENT */}
       <div className="hero relative z-10 w-full px-4 sm:px-6 md:px-8 py-6">
         <div className="hero-content text-center w-full max-w-5xl mx-auto">
           <div className="max-w-4xl flex flex-col items-center w-full">
             
-            {/* Top Pill Badge */}
             <div className="inline-flex items-center gap-2 px-1.5 py-1.5 pr-4 border border-white/10 bg-white/5 backdrop-blur-md mb-4 sm:mb-6 shadow-xl rounded-full">
               <span className="bg-white text-black font-bold text-[9px] sm:text-[10px] uppercase tracking-wider px-2.5 py-0.5 rounded-full shadow-sm">
                 Created by
@@ -213,17 +190,14 @@ export default function Home() {
               </span>
             </div>
 
-            {/* Main Heading */}
             <h1 className="text-4xl sm:text-6xl md:text-7xl lg:text-[5.5rem] font-extrabold mb-3 sm:mb-4 text-white tracking-tight leading-[1.1]">
               MON CHER
             </h1>
             
-            {/* Subheading */}
             <p className="text-sm sm:text-lg md:text-xl font-medium text-white/80 mb-8 sm:mb-10 max-w-xs sm:max-w-md md:max-w-xl mx-auto leading-relaxed">
               Bridging the distance, right through the office walls.
             </p>
             
-            {/* Action Buttons */}
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full max-w-[16rem] sm:max-w-none mx-auto">
               <div className="w-full sm:w-[260px] md:w-[280px]">
                 <motion.div
@@ -259,8 +233,6 @@ export default function Home() {
 
       {/* ================= AUTHENTICATION MODAL ================= */}
       <dialog id="login_modal" className="modal modal-bottom sm:modal-middle backdrop-blur-md bg-black/40 " onClose={resetModal}>
-
-        {/* ================= GLOWING TOAST NOTIFICATION (REACTBITS STYLE - TOP LAYER Z-50) ================= */}
         
         <div className="fixed top-6 z-[9999] px-4 w-full max-w-md pointer-events-none flex justify-center">
           <AnimatePresence>
@@ -302,7 +274,6 @@ export default function Home() {
           <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-6 sm:hidden"></div>
 
           {modalStep === 'email' ? (
-            /* ================= STEP 1: ENTER EMAIL ================= */
             <div>
               <h3 className="font-bold text-2xl mb-2 text-center text-white">Welcome Back</h3>
               <p className="text-white/60 text-sm text-center mb-6">
@@ -343,7 +314,6 @@ export default function Home() {
               </form>
             </div>
           ) : (
-            /* ================= STEP 2: ENTER CODE ================= */
             <div>
               <h3 className="font-bold text-2xl mb-2 text-center text-white">Check Your Email</h3>
               <p className="text-white/60 text-sm text-center mb-6">
@@ -394,7 +364,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* Close button */}
           <form method="dialog">
             <button onClick={resetModal} className="btn btn-sm btn-circle btn-ghost absolute right-4 top-4 text-white/70 hover:text-white hidden sm:flex cursor-pointer">
               ✕
@@ -408,10 +377,6 @@ export default function Home() {
         </form>
       </dialog>
 
-
-
-      
-    
     </main>
   );
 }

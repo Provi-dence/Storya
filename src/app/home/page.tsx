@@ -6,9 +6,8 @@ import SoftAurora from "@/components/SoftAurora";
 import { useRouter } from "next/navigation";
 import BorderGlow from "@/components/BorderGlow";
 
-// I-IMPORT ANG FIREBASE AUTH UG FIRESTORE FUNCTIONS
-import { auth, db } from "@/lib/firebase";
-import { onAuthStateChanged, signOut, updateProfile } from "firebase/auth";
+// I-IMPORT ANG FIREBASE DB (Wala na ta magsalig sa client auth para iwas firewall block)
+import { db } from "@/lib/firebase";
 import { 
   collection, query, where, onSnapshot, 
   addDoc, updateDoc, doc, arrayUnion, getDoc, setDoc, getDocs
@@ -62,7 +61,7 @@ export default function ChatPage() {
   const [isUpdatingName, setIsUpdatingName] = useState(false);
   const [nameUpdateMessage, setNameUpdateMessage] = useState("");
 
-  // Session & Loading States
+  // Session & Loading States (Cookie-Aware)
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [currentUid, setCurrentUid] = useState<string | null>(null);
   const [currentDisplayName, setCurrentDisplayName] = useState<string>("");
@@ -167,41 +166,32 @@ export default function ChatPage() {
   }, [incomingInvite]);
 
   // =========================================================================
-  // 1. FIREBASE SESSION & ONLINE STATUS LISTENER
+  // 1. COOKIE-BASED SESSION INITIALIZER (Bypasses Office Firewall)
   // =========================================================================
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user && user.email) {
-        setCurrentUserEmail(user.email);
-        setCurrentUid(user.uid);
+    try {
+      const cookiesList = document.cookie.split(';');
+      const sessionCookie = cookiesList.find(row => row.trim().startsWith('moncher_session_email='));
+      
+      if (sessionCookie) {
+        const emailFromCookie = sessionCookie.split('=')[1];
+        const decodedEmail = decodeURIComponent(emailFromCookie);
         
-        const userDocRef = doc(db, "users", user.uid);
-        await setDoc(userDocRef, { 
-          email: user.email, 
-          isOnline: true, 
-          lastSeen: Date.now() 
-        }, { merge: true });
+        console.log("✅ Valid session cookie found for:", decodedEmail);
 
-        let nameToUse = user.displayName || "";
-        if (!nameToUse) {
-          try {
-            const userDoc = await getDoc(userDocRef);
-            if (userDoc.exists()) {
-              nameToUse = userDoc.data().displayName || "";
-            }
-          } catch (err) {
-            console.error("Error fetching user profile:", err);
-          }
-        }
-        
-        setCurrentDisplayName(nameToUse || user.email.split('@')[0]);
-        setDisplayNameInput(nameToUse || user.email.split('@')[0]);
+        setCurrentUserEmail(decodedEmail);
+        setCurrentUid("cookie-user-id");
+        setCurrentDisplayName(decodedEmail.split('@')[0]);
+        setDisplayNameInput(decodedEmail.split('@')[0]);
         setIsSessionLoading(false);
       } else {
+        console.warn("⚠️ No session cookie found! Redirecting to login...");
         router.push("/");
       }
-    });
-    return () => unsubscribe();
+    } catch (err) {
+      console.error("❌ Session load error:", err);
+      router.push("/");
+    }
   }, [router]);
 
   // =========================================================================
@@ -402,7 +392,7 @@ export default function ChatPage() {
       const docRef = await addDoc(collection(db, "chats"), newChatData);
       setActiveChatId(docRef.id);
 
-      const inviteLink = `${window.location.origin}/?email=${encodeURIComponent(formattedRecipientEmail)}&chatId=${docRef.id}`;
+      const inviteLink = `${window.location.origin}/home?email=${encodeURIComponent(formattedRecipientEmail)}&chatId=${docRef.id}`;
       
       await fetch("/api/send-email", {
         method: "POST",
@@ -457,44 +447,51 @@ export default function ChatPage() {
   };
 
   // =========================================================================
-  // UPDATE DISPLAY NAME
+  // UPDATE DISPLAY NAME (Gamit ang Firestore Users collection imbes auth profile)
   // =========================================================================
   const handleUpdateDisplayName = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!displayNameInput.trim() || !auth.currentUser) return;
+    if (!displayNameInput.trim() || !currentUserEmail) return;
 
     setIsUpdatingName(true);
     setNameUpdateMessage("");
 
     try {
       const newName = displayNameInput.trim();
-      const userEmail = auth.currentUser.email || currentUserEmail;
 
-      await updateProfile(auth.currentUser, {
-        displayName: newName
+      // I-update sa users collection base sa email
+      const userQuery = query(collection(db, "users"), where("email", "==", currentUserEmail));
+      const userSnap = await getDocs(userQuery);
+      
+      if (!userSnap.empty) {
+        const userDocRef = userSnap.docs[0].ref;
+        await updateDoc(userDocRef, {
+          displayName: newName,
+          lastUpdatedName: Date.now()
+        });
+      } else {
+        const userDocRef = doc(collection(db, "users"));
+        await setDoc(userDocRef, {
+          email: currentUserEmail,
+          displayName: newName,
+          isOnline: true,
+          lastUpdatedName: Date.now()
+        });
+      }
+
+      const chatsQuery = query(
+        collection(db, "chats"), 
+        where("participants", "array-contains", currentUserEmail)
+      );
+      const querySnapshot = await getDocs(chatsQuery);
+
+      const updatePromises = querySnapshot.docs.map(async (chatDoc) => {
+        return updateDoc(chatDoc.ref, {
+          [`names.${currentUserEmail}`]: newName
+        });
       });
 
-      const userDocRef = doc(db, "users", auth.currentUser.uid);
-      await setDoc(userDocRef, {
-        displayName: newName,
-        lastUpdatedName: Date.now()
-      }, { merge: true });
-
-      if (userEmail) {
-        const chatsQuery = query(
-          collection(db, "chats"), 
-          where("participants", "array-contains", userEmail)
-        );
-        const querySnapshot = await getDocs(chatsQuery);
-
-        const updatePromises = querySnapshot.docs.map(async (chatDoc) => {
-          return updateDoc(chatDoc.ref, {
-            [`names.${userEmail}`]: newName
-          });
-        });
-
-        await Promise.all(updatePromises);
-      }
+      await Promise.all(updatePromises);
 
       setCurrentDisplayName(newName);
       setNameUpdateMessage("Name updated successfully!");
@@ -601,17 +598,14 @@ export default function ChatPage() {
 
   const handleLogout = async () => {
     try {
-      if (currentUid) {
-        const userDocRef = doc(db, "users", currentUid);
-        await updateDoc(userDocRef, { isOnline: false }).catch(() => {});
-      }
+      // Clear cookie by expiring it immediately
+      document.cookie = "moncher_session_email=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
 
       setCurrentUserEmail(null);
       setConversations([]);
       setIsProfileOpen(false);
 
-      await signOut(auth);
-      router.push('/logout');
+      router.push('/');
     } catch (error) {
       console.error("Logout error:", error);
     }
@@ -700,7 +694,7 @@ export default function ChatPage() {
               animated
               colors={['#c084fc', '#f472b6', '#38bdf8']}
             >
-              <div className="relative p-4 flex items-center z-[9997] gap-4 w-full h-full ">
+              <div className="relative p-4 flex items-center z-[9997] gap-4 w-full h-full bg-[#0a0a0e] rounded-[14px]">
                 
                 {/* Avatar with Outer Glow & Reaction Badge */}
                 <div className="relative w-10 h-10 shrink-0">
