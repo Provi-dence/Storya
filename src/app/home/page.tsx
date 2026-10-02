@@ -84,8 +84,9 @@ export default function ChatPage() {
   const [initialMessage, setInitialMessage] = useState("");
   const [isStartingChat, setIsStartingChat] = useState(false);
   
-  // Coming soon modal
+  // Modals for Actions
   const [showComingSoonModal, setShowComingSoonModal] = useState(false);
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
 
   // UI Toggles
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -95,9 +96,11 @@ export default function ChatPage() {
   const [activeReactionMessageId, setActiveReactionMessageId] = useState<number | null>(null);
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // Auto-scroll ref
+  // Auto-scroll refs & states
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  
   // Real Database State
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null); 
@@ -106,16 +109,53 @@ export default function ChatPage() {
   // Users Presence Map Store
   const [usersPresence, setUsersPresence] = useState<{ [email: string]: { isOnline: boolean; lastActive: number; displayName: string } }>({});
 
-  // Auto-scroll effect
   const activeConversation = conversations.find(c => c.id === activeChatId);
+
+  // ==========================================
+  // SCROLL LOGIC & FLOATING BUTTON
+  // ==========================================
+  const handleScroll = () => {
+    if (chatContainerRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+      const isScrolledUp = scrollHeight - scrollTop - clientHeight > 100; // Kung nilapas og 100px pataas
+      setShowScrollButton(isScrolledUp);
+    }
+  };
+
+  const scrollToBottom = (behavior: "smooth" | "auto" = "smooth") => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+  };
+
+  const prevMsgCount = useRef(0);
+  const prevChatId = useRef<string | null>(null);
+
   useEffect(() => {
     if (activeConversation) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      const currentMsgCount = activeConversation.messages.length;
+      const isNewChat = prevChatId.current !== activeChatId;
+      const hasNewMessages = currentMsgCount > prevMsgCount.current;
+      
+      if (isNewChat) {
+        setTimeout(() => scrollToBottom("auto"), 50); // Instant scroll for new chat open
+      } else if (hasNewMessages) {
+        const lastMsg = activeConversation.messages[currentMsgCount - 1];
+        const isMe = lastMsg?.sender === currentUserEmail;
+        
+        // Mo-scroll ra if ikaw ni-send OR if naa ka sa pinakaubos
+        if (isMe || !showScrollButton) {
+          setTimeout(() => scrollToBottom("smooth"), 50);
+        }
+      }
+      
+      prevMsgCount.current = currentMsgCount;
+      prevChatId.current = activeChatId;
     }
-  }, [activeConversation?.messages]);
+  }, [activeConversation, activeChatId, currentUserEmail, showScrollButton]);
 
-  const lastCheckedMessageId = useRef<number | null>(null);
-  const lastCheckedReactionTime = useRef<number | null>(null);
+  // FIX: Mas nindot nga approach para dili mag-spam ang toaster matag chat
+  const lastCheckedMessages = useRef<{ [chatId: string]: number }>({});
+  const lastCheckedReactions = useRef<{ [chatId: string]: number }>({});
+  const isInitialLoad = useRef(true);
 
   // HEARTBEAT PING (Matag 10 segundos)
   useEffect(() => {
@@ -175,9 +215,6 @@ export default function ChatPage() {
     isReaction?: boolean; 
     emoji?: string; 
   } | null>(null);
-  
-  const lastNotifiedMessageId = useRef<number | null>(null);
-  const lastNotifiedReactionTime = useRef<number | null>(null);
   
   useEffect(() => {
     if (typeof window !== "undefined" && "Notification" in window) {
@@ -261,35 +298,43 @@ export default function ChatPage() {
             const messages = chat.messages || [];
             const lastMsg = messages[messages.length - 1];
 
-            
-
             // 1. CHECK FOR NEW INCOMING MESSAGES TOASTER
-            if (lastMsg && lastMsg.sender !== currentUserEmail) {
-              if (lastCheckedMessageId.current !== lastMsg.id && activeChatId !== chat.id) {
-                lastCheckedMessageId.current = lastMsg.id;
-                setToastNotification({
-                  show: true,
-                  sender: rawAssignedName,
-                  message: lastMsg.text,
-                  id: lastMsg.id,
-                  isReaction: false
-                });
+            if (lastMsg) {
+              const prevMsgId = lastCheckedMessages.current[chat.id];
+              
+              if (prevMsgId !== lastMsg.id) {
+                lastCheckedMessages.current[chat.id] = lastMsg.id; 
+                
+                if (lastMsg.sender !== currentUserEmail && !isInitialLoad.current && activeChatId !== chat.id) {
+                  setToastNotification({
+                    show: true,
+                    sender: rawAssignedName,
+                    message: lastMsg.text,
+                    id: lastMsg.id,
+                    isReaction: false
+                  });
+                }
               }
             }
 
             // 2. CHECK FOR NEW REACTIONS TOASTER
             const reactionData = chat.latestReaction;
-            if (reactionData && reactionData.emoji && reactionData.emoji !== "" && reactionData.reactor !== currentUserEmail) {
-              if (lastCheckedReactionTime.current !== reactionData.timestamp) {
-                lastCheckedReactionTime.current = reactionData.timestamp;
-                setToastNotification({
-                  show: true,
-                  sender: rawAssignedName,
-                  message: `reacted to your message "${reactionData.messageText || ''}"`,
-                  id: reactionData.timestamp,
-                  isReaction: true,
-                  emoji: reactionData.emoji
-                });
+            if (reactionData && reactionData.emoji && reactionData.emoji !== "") {
+              const prevRxTime = lastCheckedReactions.current[chat.id];
+              
+              if (prevRxTime !== reactionData.timestamp) {
+                lastCheckedReactions.current[chat.id] = reactionData.timestamp; 
+
+                if (reactionData.reactor !== currentUserEmail && !isInitialLoad.current && activeChatId !== chat.id) {
+                  setToastNotification({
+                    show: true,
+                    sender: rawAssignedName,
+                    message: `reacted to your message "${reactionData.messageText || ''}"`,
+                    id: reactionData.timestamp,
+                    isReaction: true,
+                    emoji: reactionData.emoji
+                  });
+                }
               }
             }
 
@@ -317,6 +362,8 @@ export default function ChatPage() {
 
           fetchedChats.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
           setConversations(fetchedChats);
+          
+          isInitialLoad.current = false; // Initial load is done
 
           const pending = fetchedChats.find(c => c.status === "pending" && c.invitedBy !== currentUserEmail);
           if (pending) {
@@ -345,11 +392,23 @@ export default function ChatPage() {
     e.preventDefault();
     if (!recipientName || !recipientEmail || !currentUserEmail) return;
     
+    // Check if conversation with this email already exists
+    const formattedRecipientEmail = recipientEmail.toLowerCase().trim();
+    const existingConversation = conversations.find(c => c.email.toLowerCase().trim() === formattedRecipientEmail);
+    
+    if (existingConversation) {
+      const modal = document.getElementById('new_chat_modal') as HTMLDialogElement;
+      modal?.close();
+      setShowDuplicateModal(true); 
+      setRecipientEmail("");
+      setRecipientName("");
+      setInitialMessage("");
+      return; 
+    }
+
     setIsStartingChat(true);
 
     try {
-      const formattedRecipientEmail = recipientEmail.toLowerCase().trim();
-      
       const res = await fetch('/api/chats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -469,6 +528,7 @@ export default function ChatPage() {
           messageText: textToSend
         })
       });
+      scrollToBottom("smooth"); // Force scroll to bottom when user sends a message
     } catch (error) {
       console.error("Error sending message:", error);
     }
@@ -504,14 +564,12 @@ export default function ChatPage() {
 
   const handleLogout = async () => {
     try {
-      // 1. I-update ang presence sa server/database nga offline na siya
       await fetch('/api/presence', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'logout' }) // o kaha i-handle sa API
+        body: JSON.stringify({ action: 'logout' })
       }).catch(() => {});
 
-      // 2. Clear sa session cookie
       document.cookie = "moncher_session_email=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
       setCurrentUserEmail(null);
       setConversations([]);
@@ -892,7 +950,11 @@ export default function ChatPage() {
         </header>
 
         {/* Chat Messages */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col max-w-3xl w-full mx-auto">
+        <div 
+          ref={chatContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col max-w-3xl w-full mx-auto"
+        >
           <div className="flex flex-col gap-4 mt-auto">
             {activeChatId !== null && activeConversation ? (
               <>
@@ -971,9 +1033,30 @@ export default function ChatPage() {
           </div>
         </div>
 
+        {/* FLOATING DOWN ARROW BUTTON */}
+        <AnimatePresence>
+          {showScrollButton && activeChatId && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.8, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 15 }}
+              onClick={() => scrollToBottom("smooth")}
+              className="absolute bottom-24 right-6 sm:bottom-28 sm:right-10 z-50 flex items-center justify-center w-12 h-12 bg-[#120F17]/90 hover:bg-black/90 backdrop-blur-md border border-white/20 text-white rounded-full shadow-[0_0_20px_rgba(236,72,153,0.3)] transition-colors cursor-pointer"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-pink-500 drop-shadow-md" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M16 17l-4 4m0 0l-4-4m4 4V3" />
+              </svg>
+              {/* Gi-fix nato ang condition diri aron dili mo-render og '0' */}
+              {(activeConversation?.unreadCount ?? 0) > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-pink-500 border-2 border-[#120F17] rounded-full animate-bounce"></span>
+              )}
+            </motion.button>
+          )}
+        </AnimatePresence>
+
         {/* Message Input Box */}
         {activeChatId !== null && activeConversation && activeConversation.status === "accepted" && (
-          <div className="p-3 sm:p-4 bg-black/20 backdrop-blur-xl border-t border-white/5">
+          <div className="p-3 sm:p-4 bg-black/20 backdrop-blur-xl border-t border-white/5 relative z-40">
             <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex items-center gap-2 sm:gap-3">
               <input 
                 type="text"
@@ -993,6 +1076,60 @@ export default function ChatPage() {
         )}
       </main>
       
+      {/* ================= DUPLICATE EMAIL MODAL (BORDER GLOW) ================= */}
+      <AnimatePresence>
+        {showDuplicateModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowDuplicateModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              onClick={(e) => e.stopPropagation()} 
+              className="max-w-sm w-full"
+            >
+              <BorderGlow
+                edgeSensitivity={30}
+                glowColor="40 80 80"
+                backgroundColor="#120F17"
+                borderRadius={28}
+                glowRadius={40}
+                glowIntensity={1}
+                coneSpread={25}
+                animated={true}
+                colors={['#ef4444', '#f97316', '#eab308']}
+              >
+                <div className="p-8 text-center flex flex-col items-center gap-4 text-white">
+                  <div className="w-16 h-16 bg-gradient-to-tr from-orange-500/20 to-red-500/20 border border-white/10 rounded-full flex items-center justify-center mb-2 shadow-inner">
+                    <span className="text-3xl drop-shadow-md">⚠️</span>
+                  </div>
+                  
+                  <h2 className="text-2xl font-bold bg-gradient-to-r from-orange-400 to-red-500 bg-clip-text text-transparent">
+                    Email Exists
+                  </h2>
+                  
+                  <p className="text-white/60 text-sm leading-relaxed">
+                    You already have an existing conversation with this email. Please check your recent chats sidebar.
+                  </p>
+                  
+                  <button
+                    onClick={() => setShowDuplicateModal(false)}
+                    className="mt-4 px-6 py-2.5 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl transition-all font-medium text-sm w-full active:scale-95 cursor-pointer"
+                  >
+                    Got it, thanks!
+                  </button>
+                </div>
+              </BorderGlow>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ================= COMING SOON MODAL (BORDER GLOW) ================= */}
       <AnimatePresence>
         {showComingSoonModal && (
