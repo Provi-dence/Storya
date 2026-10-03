@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import SoftAurora from "@/components/SoftAurora";
 import BorderGlow from "@/components/BorderGlow";
+import WarpText from '@/components/WarpText';
+import TextType from '@/components/TextType';
 
 // I-IMPORT ANG FIREBASE AUTH FUNCTIONS
 import { auth } from "@/lib/firebase"; 
@@ -12,7 +14,13 @@ import { onAuthStateChanged } from "firebase/auth";
 
 export default function Home() {
   const router = useRouter();
-  
+
+  // ==========================================
+  // LOGIN PAGE BACKGROUND (Static Chill Vibe)
+  // ==========================================
+  // Dili na nato kinahanglan ang AI dynamic mood diri kay wala pay chat session.
+  const chillMood = { color1: "#f7f7f7", color2: "#e100ff" };
+    
   // States para sa flow
   const [isLoading, setIsLoading] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
@@ -25,7 +33,7 @@ export default function Home() {
   // State para sa Modal Steps: 'email' o kaya 'code'
   const [modalStep, setModalStep] = useState<'email' | 'code'>('email');
 
-  // State para sa Glowing Toast Notification (ReactBits Style)
+  // State para sa Glowing Toast Notification
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const showCustomToast = (message: string, type: 'success' | 'error') => {
@@ -36,7 +44,7 @@ export default function Home() {
   };
 
   // =========================================================================
-  // AUTO-REDIRECT KUNG NAKA-LOG IN NA DAAN ANG USER (Mo-work rani kung naa sa balay)
+  // AUTO-REDIRECT KUNG NAKA-LOG IN NA DAAN ANG USER
   // =========================================================================
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -47,7 +55,6 @@ export default function Home() {
       }
     });
 
-    // Fallback in case na-block ang identitytoolkit sa firewall, i-stop ang loading
     const timer = setTimeout(() => setIsCheckingSession(false), 3000);
 
     return () => {
@@ -104,21 +111,13 @@ export default function Home() {
     const dummyPassword = `${senderEmail}-MonCherSecretAuth2026!`;
 
     try {
-
-      console.log("🚀 Sending login request to /api/login...");
-
-      // DIRI NA NATO TAWAGON ANG BACKEND IMbes NGA FIREBASE CLIENT DIRECTLY
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          email: senderEmail, 
-          password: dummyPassword 
-        })
+        body: JSON.stringify({ email: senderEmail, password: dummyPassword })
       });
 
       const data = await response.json();
-      console.log("📥 API Response received:", response.status, data);
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to authenticate via server.");
@@ -130,13 +129,12 @@ export default function Home() {
         setIsLoading(false);
         const modal = document.getElementById('login_modal') as HTMLDialogElement;
         modal?.close();
-        window.location.href = '/home';
+        window.location.href = '/home'; // Mobalhin na siya sa Chat Page
       }, 1000);
 
     } catch (error: any) {
       setIsLoading(false);
       console.error("Backend Auth Error:", error.message);
-      
       showCustomToast("Nag-error ang server login. Palihug sulayi usab.", "error");
     }
   };
@@ -160,13 +158,13 @@ export default function Home() {
   return (
     <main className="relative h-[100dvh] w-full overflow-hidden bg-[#0a0a0e] flex items-center justify-center font-sans">
       
-      {/* 1. BACKGROUND ANIMATION */}
+      {/* 1. BACKGROUND ANIMATION (Static Chill lang sa Login Page) */}
       <div className="absolute inset-0 z-0">
         <SoftAurora 
-          color1="#f7f7f7" 
-          color2="#e100ff" 
-          speed={0.6} 
-          brightness={1.2}
+          color1={chillMood.color1} 
+          color2={chillMood.color2} 
+          speed={0.3} 
+          brightness={1.5}
           noiseFrequency={2.5}
           bandSpread={1}
           colorSpeed={1}
@@ -190,13 +188,40 @@ export default function Home() {
               </span>
             </div>
 
-            <h1 className="text-4xl sm:text-6xl md:text-7xl lg:text-[5.5rem] font-extrabold mb-3 sm:mb-4 text-white tracking-tight leading-[1.1]">
-              MON CHER
-            </h1>
-            
-            <p className="text-sm sm:text-lg md:text-xl font-medium text-white/80 mb-8 sm:mb-10 max-w-xs sm:max-w-md md:max-w-xl mx-auto leading-relaxed">
-              Bridging the distance, right through the office walls.
-            </p>
+            <div className="mb-3 sm:mb-4 flex justify-center w-full">
+              <WarpText
+                text="WAZZAP CHAT"
+                color="#ffffff"
+                warpStrength={0.08}
+                warpScale={1.7}
+                speed={0.55}
+                pointerInfluence={0.42}
+                pointerStrength={0.38}
+                refraction={0.018}
+                ripple
+                fontSize={116} 
+                fontWeight={800} 
+                style={{ height: '0px', width: '100%' }}
+                fontFamily="inherit"
+                letterSpacing={-0.06}
+                lineHeight={0.9}
+                className="text-4xl sm:text-6xl md:text-7xl lg:text-[5.5rem] tracking-tight leading-[1.1]" 
+              />
+            </div>
+                        
+            <div className="text-sm sm:text-lg md:text-xl font-medium text-white/80 mb-8 sm:mb-10 max-w-xs sm:max-w-md md:max-w-xl mx-auto leading-relaxed text-center">
+              <TextType 
+                text={["Seamless chats, limitless connections.", "Bridging the distance, instantly.", "Say hello to better messaging."]}
+                typingSpeed={75}
+                pauseDuration={1500}
+                showCursor
+                cursorCharacter="_"
+                deletingSpeed={50}
+                variableSpeed={{ min: 60, max: 120 }}
+                cursorBlinkDuration={0.5}
+                className="inline-block" 
+              />
+            </div>
             
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full max-w-[16rem] sm:max-w-none mx-auto">
               <div className="w-full sm:w-[260px] md:w-[280px]">
@@ -231,7 +256,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ================= AUTHENTICATION MODAL ================= */}
+      {/* ================= AUTHENTICATION MODAL (Wala giusab) ================= */}
       <dialog id="login_modal" className="modal modal-bottom sm:modal-middle backdrop-blur-md bg-black/40 " onClose={resetModal}>
         
         <div className="fixed top-6 z-[9999] px-4 w-full max-w-md pointer-events-none flex justify-center">
@@ -270,7 +295,6 @@ export default function Home() {
         </div>
 
         <div className="modal-box bg-[#120F17] border border-white/10 border-b-0 sm:border-b-white/10 text-white shadow-2xl rounded-t-[2rem] rounded-b-none sm:rounded-3xl p-6 sm:p-8">
-          
           <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-6 sm:hidden"></div>
 
           {modalStep === 'email' ? (
@@ -279,7 +303,6 @@ export default function Home() {
               <p className="text-white/60 text-sm text-center mb-6">
                 Enter your email address to receive a secure login code.
               </p>
-
               <form onSubmit={handleRequestCode} className="space-y-4">
                 <div>
                   <label className="label text-xs uppercase tracking-wider text-white/70 font-semibold px-1">
@@ -294,7 +317,6 @@ export default function Home() {
                     className="input input-bordered w-full bg-black/50 border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-pink-500 rounded-xl h-12"
                   />
                 </div>
-
                 <div className="modal-action mt-6 flex gap-3">
                   <button 
                     type="submit" 
@@ -319,7 +341,6 @@ export default function Home() {
               <p className="text-white/60 text-sm text-center mb-6">
                 We've sent a verification code to <span className="text-white font-medium">{senderEmail}</span>
               </p>
-
               <form onSubmit={handleVerifyCode} className="space-y-4">
                 <div>
                   <label className="label text-xs uppercase tracking-wider text-white/70 font-semibold px-1">
@@ -335,7 +356,6 @@ export default function Home() {
                     className="input input-bordered w-full bg-black/50 border-white/10 text-white placeholder-white/30 text-center tracking-widest text-lg focus:outline-none focus:border-pink-500 rounded-xl h-12"
                   />
                 </div>
-
                 <div className="modal-action mt-6 flex flex-col gap-2">
                   <button 
                     type="submit" 
@@ -351,7 +371,6 @@ export default function Home() {
                       "Verify & Log in"
                     )}
                   </button>
-
                   <button 
                     type="button" 
                     onClick={() => setModalStep('email')}

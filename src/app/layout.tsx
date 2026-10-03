@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Junwell's Mon Cher",
-  description: "Storya",
+  title: "WAZZAP CHAT!",
+  description: "Say hello to better messaging",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

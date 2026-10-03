@@ -12,6 +12,7 @@ interface Message {
   text: string;
   time: string;
   reaction?: string;
+  image?: string | null; 
 }
 
 interface Conversation {
@@ -27,6 +28,7 @@ interface Conversation {
   messages: Message[];
   unreadCount?: number; 
   lastActive?: number;  
+  mood?: string;
 }
 
 const getTimeAgo = (timestamp: number) => {
@@ -110,6 +112,115 @@ export default function ChatPage() {
   const [usersPresence, setUsersPresence] = useState<{ [email: string]: { isOnline: boolean; lastActive: number; displayName: string } }>({});
 
   const activeConversation = conversations.find(c => c.id === activeChatId);
+
+  // 1. State para sa napili nga image preview
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+
+  // 2. Function para mo-handle sa pag-upload/pagpili sa file
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        // Mo-convert ngadto sa Base64 string aron masave sa Firestore
+        setSelectedImage(reader.result as string); 
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+  // ==========================================
+  // AI MOOD DYNAMIC COLORS
+  // ==========================================
+
+type MoodType =
+  | "romantic"
+  | "heated"
+  | "excited"
+  | "serious"
+  | "chill";
+
+
+
+
+const normalizeMood = (mood?: string): MoodType => {
+  const normalized = mood?.trim().toLowerCase();
+
+  if (
+    normalized === "romantic" ||
+    normalized === "heated" ||
+    normalized === "excited" ||
+    normalized === "serious" ||
+    normalized === "chill"
+  ) {
+    return normalized;
+  }
+
+  return "chill";
+};
+
+
+
+
+
+  // ==========================================
+  // MOOD THEMES
+  // ==========================================
+
+  const allMoodThemes: Record<
+    MoodType,
+    {
+      color1: string;
+      color2: string;
+      label: string;
+      textClass: string;
+      glowClass: string;
+    }
+  > = {
+    romantic: {
+      color1: "#ff477e",
+      color2: "#ff70a6",
+      label: "💖 Romantic",
+      textClass: "text-pink-400",
+      glowClass: "shadow-[0_0_15px_rgba(255,71,126,0.45)]"
+    },
+
+    heated: {
+      color1: "#ff0000",
+      color2: "#ff5400",
+      label: "🔥 Heated",
+      textClass: "text-red-400",
+      glowClass: "shadow-[0_0_15px_rgba(255,0,84,0.45)]"
+    },
+
+    excited: {
+      color1: "#e4c725",
+      color2: "#eea443",
+      label: "🎉 Excited",
+      textClass: "text-purple-400",
+      glowClass: "shadow-[0_0_15px_rgba(114,9,183,0.45)]"
+    },
+
+    serious: {
+      color1: "#0ca358",
+      color2: "#48ef48",
+      label: "💼 Serious",
+      textClass: "text-blue-400",
+      glowClass: "shadow-[0_0_15px_rgba(58,12,163,0.45)]"
+    },
+
+    chill: {
+      color1: "#52c9f8",
+      color2: "#4365fc",
+      label: "✨ Chill",
+      textClass: "text-gray-400",
+      glowClass: "shadow-[0_0_15px_rgba(225,0,255,0.20)]"
+    }
+  };
+
+
+const currentMood = normalizeMood(activeConversation?.mood);
+const moodTheme = allMoodThemes[currentMood];
+
 
   // ==========================================
   // SCROLL LOGIC & FLOATING BUTTON
@@ -278,112 +389,170 @@ export default function ChatPage() {
   // FETCH CHATS & TRIGGER TOASTER NOTIFICATIONS (Messages & Reactions)
   // =========================================================================
   useEffect(() => {
-    
-    if (!currentUserEmail) return;
+  if (!currentUserEmail) return;
 
-    const fetchChats = async () => {
-      try {
-        const res = await fetch('/api/chats');
-        const data = await res.json();
+  const fetchChats = async () => {
+    try {
+      const res = await fetch("/api/chats", {
+        cache: "no-store",
+      });
 
-        if (res.ok && data.success) {
-          const fetchedChats: Conversation[] = data.chats.map((chat: any) => {
-            const otherEmail = chat.participants.find((e: string) => e !== currentUserEmail) || chat.participants[0];
-            const rawAssignedName = chat.names?.[otherEmail] || otherEmail;
-            
-            const userUnreadMap = chat.unreadCounts || {};
-            const emailKey = currentUserEmail.toLowerCase().trim();
-            const myUnreadCount = userUnreadMap[emailKey] || 0;
+      const data = await res.json();
 
-            const messages = chat.messages || [];
-            const lastMsg = messages[messages.length - 1];
+      if (res.ok && data.success) {
+        const fetchedChats: Conversation[] = data.chats.map((chat: any) => {
+          const otherEmail =
+            chat.participants.find(
+              (e: string) =>
+                e.toLowerCase().trim() !==
+                currentUserEmail.toLowerCase().trim()
+            ) || chat.participants[0];
 
-            // 1. CHECK FOR NEW INCOMING MESSAGES TOASTER
-            if (lastMsg) {
-              const prevMsgId = lastCheckedMessages.current[chat.id];
-              
-              if (prevMsgId !== lastMsg.id) {
-                lastCheckedMessages.current[chat.id] = lastMsg.id; 
-                
-                if (lastMsg.sender !== currentUserEmail && !isInitialLoad.current && activeChatId !== chat.id) {
-                  setToastNotification({
-                    show: true,
-                    sender: rawAssignedName,
-                    message: lastMsg.text,
-                    id: lastMsg.id,
-                    isReaction: false
-                  });
-                }
+          const rawAssignedName =
+            chat.names?.[otherEmail] || otherEmail;
+
+          const userUnreadMap = chat.unreadCounts || {};
+          const emailKey = currentUserEmail.toLowerCase().trim();
+          const myUnreadCount = userUnreadMap[emailKey] || 0;
+
+          const messages = chat.messages || [];
+          const lastMsg = messages[messages.length - 1];
+
+          // -----------------------------
+          // NEW MESSAGE TOASTER
+          // -----------------------------
+          if (lastMsg) {
+            const prevMsgId =
+              lastCheckedMessages.current[chat.id];
+
+            if (prevMsgId !== lastMsg.id) {
+              lastCheckedMessages.current[chat.id] = lastMsg.id;
+
+              if (
+                lastMsg.sender !== currentUserEmail &&
+                !isInitialLoad.current &&
+                activeChatId !== chat.id
+              ) {
+                setToastNotification({
+                  show: true,
+                  sender: rawAssignedName,
+                  message: lastMsg.text,
+                  id: lastMsg.id,
+                  isReaction: false,
+                });
               }
             }
-
-            // 2. CHECK FOR NEW REACTIONS TOASTER
-            const reactionData = chat.latestReaction;
-            if (reactionData && reactionData.emoji && reactionData.emoji !== "") {
-              const prevRxTime = lastCheckedReactions.current[chat.id];
-              
-              if (prevRxTime !== reactionData.timestamp) {
-                lastCheckedReactions.current[chat.id] = reactionData.timestamp; 
-
-                if (reactionData.reactor !== currentUserEmail && !isInitialLoad.current && activeChatId !== chat.id) {
-                  setToastNotification({
-                    show: true,
-                    sender: rawAssignedName,
-                    message: `reacted to your message "${reactionData.messageText || ''}"`,
-                    id: reactionData.timestamp,
-                    isReaction: true,
-                    emoji: reactionData.emoji
-                  });
-                }
-              }
-            }
-
-            // Makuha ang sakto nga presence sa uban gikan sa usersPresence state map
-            const cleanOtherEmail = otherEmail.toLowerCase().trim();
-            const peerPresence = usersPresence[cleanOtherEmail];
-            const peerOnline = peerPresence ? checkIsUserOnline(peerPresence.lastActive, peerPresence.isOnline) : false;
-            const peerLastActive = peerPresence ? peerPresence.lastActive : undefined;
-
-            return {
-              id: chat.id,
-              name: rawAssignedName,
-              email: otherEmail,
-              lastMessage: chat.lastMessage || "",
-              time: chat.time || "",
-              updatedAt: chat.updatedAt || 0,
-              isOnline: peerOnline,
-              lastActive: peerLastActive,
-              status: chat.status || "accepted",
-              invitedBy: chat.invitedBy || "",
-              messages: messages,
-              unreadCount: myUnreadCount
-            };
-          });
-
-          fetchedChats.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-          setConversations(fetchedChats);
-          
-          isInitialLoad.current = false; // Initial load is done
-
-          const pending = fetchedChats.find(c => c.status === "pending" && c.invitedBy !== currentUserEmail);
-          if (pending) {
-            setIncomingInvite({
-              chatId: pending.id,
-              inviterName: pending.name,
-              inviterEmail: pending.email
-            });
-            setTimeLeft(60);
           }
-        }
-      } catch (error) {
-        console.error("Error fetching chats via API:", error);
-      }
-    };
 
-    fetchChats();
-    const interval = setInterval(fetchChats, 3500);
-    return () => clearInterval(interval);
-  }, [currentUserEmail, activeChatId]);
+          // -----------------------------
+          // REACTION TOASTER
+          // -----------------------------
+          const reactionData = chat.latestReaction;
+
+          if (
+            reactionData &&
+            reactionData.emoji &&
+            reactionData.emoji !== ""
+          ) {
+            const prevRxTime =
+              lastCheckedReactions.current[chat.id];
+
+            if (prevRxTime !== reactionData.timestamp) {
+              lastCheckedReactions.current[chat.id] =
+                reactionData.timestamp;
+
+              if (
+                reactionData.reactor !== currentUserEmail &&
+                !isInitialLoad.current &&
+                activeChatId !== chat.id
+              ) {
+                setToastNotification({
+                  show: true,
+                  sender: rawAssignedName,
+                  message: `reacted to your message "${reactionData.messageText || ""}"`,
+                  id: reactionData.timestamp,
+                  isReaction: true,
+                  emoji: reactionData.emoji,
+                });
+              }
+            }
+          }
+
+          // -----------------------------
+          // PRESENCE
+          // -----------------------------
+          const cleanOtherEmail =
+            otherEmail.toLowerCase().trim();
+
+          const peerPresence =
+            usersPresence[cleanOtherEmail];
+
+          const peerOnline = peerPresence
+            ? checkIsUserOnline(
+                peerPresence.lastActive,
+                peerPresence.isOnline
+              )
+            : false;
+
+          const peerLastActive =
+            peerPresence?.lastActive;
+
+          // -----------------------------
+          // IMPORTANT: MOOD
+          // -----------------------------
+          const mood = normalizeMood(chat.mood);
+
+          return {
+            id: chat.id,
+            name: rawAssignedName,
+            email: otherEmail,
+            lastMessage: chat.lastMessage || "",
+            time: chat.time || "",
+            updatedAt: chat.updatedAt || 0,
+            isOnline: peerOnline,
+            lastActive: peerLastActive,
+            status: chat.status || "accepted",
+            invitedBy: chat.invitedBy || "",
+            messages,
+            unreadCount: myUnreadCount,
+
+            // DYNAMIC MOOD FROM API
+            mood,
+          };
+        });
+
+        console.log(
+          "MOODS FROM API:",
+          data.chats.map((chat: any) => ({
+            id: chat.id,
+            mood: chat.mood,
+          }))
+        );
+
+        fetchedChats.sort(
+          (a, b) =>
+            (b.updatedAt || 0) - (a.updatedAt || 0)
+        );
+
+        setConversations(fetchedChats);
+
+        isInitialLoad.current = false;
+      }
+    } catch (error) {
+      console.error(
+        "Error fetching chats via API:",
+        error
+      );
+    }
+  };
+
+  fetchChats();
+
+  const interval = setInterval(fetchChats, 3000);
+
+  return () => clearInterval(interval);
+}, [currentUserEmail, activeChatId, usersPresence]);
+
 
   // =========================================================================
   // 3. START NEW CONVERSATION VIA API
@@ -513,22 +682,29 @@ export default function ChatPage() {
   // =========================================================================
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputMessage.trim() || !activeChatId || !currentUserEmail) return;
-
-    const textToSend = inputMessage;
-    setInputMessage("");
+    
+    // 1. Siguroha nga dili mo-send kung blangko ang text UG walay picture
+    if (!inputMessage.trim() && !selectedImage) return;
 
     try {
-      await fetch('/api/chats', {
+      const response = await fetch('/api/chats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'send_message',
           chatId: activeChatId,
-          messageText: textToSend
+          messageText: inputMessage, // Siguroha nga 'inputMessage' ni kay mao ni ang state sa imong input field
+          image: selectedImage       // Ang Base64 string sa picture
         })
       });
-      scrollToBottom("smooth"); // Force scroll to bottom when user sends a message
+
+      if (response.ok) {
+        // 2. I-clear ang input field ug ang picture preview inig human og send
+        setInputMessage("");    
+        setSelectedImage(null); 
+      } else {
+        console.error("Failed to send message:", await response.text());
+      }
     } catch (error) {
       console.error("Error sending message:", error);
     }
@@ -696,19 +872,50 @@ export default function ChatPage() {
       </AnimatePresence>
 
       {/* 1. BLURRED AMBIENT BACKGROUND */}
-      <div className="absolute inset-0 z-0 pointer-events-none">
-        <div className="absolute inset-0 bg-[#0a0a0e]/60 backdrop-blur-[80px] z-10" />
-        <SoftAurora 
-          color1="#f7f7f7" 
-          color2="#e100ff" 
-          speed={0.3} 
-          brightness={1.5}
-          noiseFrequency={2.5}
-          bandSpread={1}
-          colorSpeed={1}
-          scale={1.5}
-        />
+      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+
+        <AnimatePresence mode="sync">
+          <motion.div
+            key={currentMood}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{
+              opacity: {
+                duration: 1.5,
+                ease: "easeInOut"
+              }
+            }}
+            className="absolute inset-0"
+          >
+            <SoftAurora
+              color1={moodTheme.color1}
+              color2={moodTheme.color2}
+              speed={
+                currentMood === "heated"
+                  ? 0.6
+                  : currentMood === "chill"
+                    ? 0.2
+                    : 0.4
+              }
+              brightness={
+                currentMood === "heated"
+                  ? 1.8
+                  : 1.5
+              }
+              noiseFrequency={2.5}
+              bandSpread={1}
+              colorSpeed={1}
+              scale={1.5}
+            />
+          </motion.div>
+        </AnimatePresence>
+
+        {/* Less blur */}
+        <div className="absolute inset-0 bg-[#0a0a0e]/35 backdrop-blur-[30px] z-10" />
+
       </div>
+
 
       {/* SIDEBAR OVERLAY FOR MOBILE */}
       {isSidebarOpen && (
@@ -731,8 +938,9 @@ export default function ChatPage() {
         <div className="w-72 h-full flex flex-col p-4 min-w-[18rem] relative">
           
           <div className="flex items-center gap-1.5 px-2 mb-6 mt-1 cursor-default">
+
             <h1 className="text-4xl font-black tracking-tighter text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.2)]">
-              MON CHER
+              WZZP CHT
             </h1>
             <div className="w-2.5 h-2.5 rounded-full bg-pink-500 animate-pulse mt-2 shadow-[0_0_12px_rgba(236,72,153,0.8)]"></div>
           </div>
@@ -924,7 +1132,7 @@ export default function ChatPage() {
           {activeConversation ? (
             <div className="flex items-center gap-2.5 min-w-0 px-2 truncate">
               <div className="relative shrink-0">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-500 to-pink-500 flex items-center justify-center text-xs font-bold">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-500 to-pink-500 flex items-center justify-center text-xs font-bold text-white">
                   {activeConversation.name.charAt(0).toUpperCase()}
                 </div>
                 {/* DYNAMIC HEADER GREEN / GRAY DOT */}
@@ -932,8 +1140,60 @@ export default function ChatPage() {
                   activeConversation.isOnline ? "bg-green-500" : "bg-gray-500"
                 }`}></span>
               </div>
+
               <div className="flex flex-col min-w-0">
-                <span className="text-sm font-semibold text-white/90 leading-tight truncate">{activeConversation.name}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-white/90 leading-tight truncate">
+                    {activeConversation.name}
+                  </span>
+                  
+                  {/* AI MOOD BADGE NGA NA-APIL SA HEADER */}
+                    <AnimatePresence mode="wait">
+                      <motion.span
+                        key={currentMood}
+                        initial={{
+                          opacity: 0,
+                          scale: 0.7,
+                          y: -5,
+                          filter: "blur(4px)",
+                        }}
+                        animate={{
+                          opacity: 1,
+                          scale: 1,
+                          y: 0,
+                          filter: "blur(0px)",
+                          color: moodTheme.color1,
+                          boxShadow: `0 0 16px ${moodTheme.color1}55`,
+                        }}
+                        exit={{
+                          opacity: 0,
+                          scale: 0.7,
+                          y: 5,
+                          filter: "blur(4px)",
+                        }}
+                        transition={{
+                          duration: 0.45,
+                          ease: "easeInOut",
+                        }}
+                        className="
+                          text-[9px]
+                          font-bold
+                          px-2.5
+                          py-1
+                          rounded-full
+                          bg-black/40
+                          border
+                          border-white/10
+                          backdrop-blur-md
+                          whitespace-nowrap
+                          justify-content-middle
+                        "
+                      >
+                        {moodTheme.label}
+                      </motion.span>
+                    </AnimatePresence>
+                </div>
+
                 {/* DYNAMIC HEADER STATUS TEXT */}
                 <span className={`text-[10px] font-medium ${
                   activeConversation.isOnline ? "text-green-400" : "text-gray-400"
@@ -980,11 +1240,61 @@ export default function ChatPage() {
                         onTouchStart={() => handleTouchStart(msg.id)}
                         onTouchEnd={handleTouchEnd}
                       >
-                        <div className={`text-sm py-3 px-4 shadow-lg rounded-2xl ${
-                          isMe 
-                            ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-tr-sm" 
-                            : "bg-white/10 backdrop-blur-md text-white rounded-tl-sm border border-white/10"
-                        }`}>
+                        <motion.div
+                          className={`
+                            relative
+                            text-sm
+                            py-3
+                            px-4
+                            shadow-lg
+                            rounded-2xl
+                            text-white
+                            ${
+                              isMe
+                                ? "rounded-tr-sm"
+                                : "bg-white/10 backdrop-blur-md rounded-tl-sm border border-white/10"
+                            }
+                          `}
+                          animate={
+                            isMe
+                              ? {
+                                  background: `linear-gradient(
+                                    120deg,
+                                    ${moodTheme.color1},
+                                    ${moodTheme.color2},
+                                    ${moodTheme.color1}
+                                  )`,
+                                  boxShadow: `
+                                    0 8px 30px ${moodTheme.color1}35,
+                                    0 0 20px ${moodTheme.color2}20
+                                  `,
+                                }
+                              : undefined
+                          }
+                          transition={{
+                            background: {
+                              duration: 1.2,
+                              ease: "easeInOut",
+                            },
+                            boxShadow: {
+                              duration: 1.2,
+                              ease: "easeInOut",
+                            },
+                          }}
+                        >
+
+                          {/* STRICT CHECK: I-display lang kung ang msg.image ay valid na Base64 data URL */}
+                          {msg.image && typeof msg.image === 'string' && msg.image.startsWith('data:image') && (
+                            <div className="mb-1.5">
+                              <img 
+                                src={msg.image} 
+                                alt="Attachment" 
+                                className="max-w-xs sm:max-w-sm rounded-xl object-cover shadow-sm"
+                                style={{ maxHeight: '300px' }}
+                              />
+                            </div>
+                          )} 
+                          
                           {msg.text}
 
                           {msg.reaction && msg.reaction !== "" && (
@@ -992,7 +1302,9 @@ export default function ChatPage() {
                               {msg.reaction}
                             </span>
                           )}
-                        </div>
+                        </motion.div>
+
+
 
                         {/* REACTION MENU */}
                         <div className={`absolute -top-12 transition-opacity duration-200 flex items-center gap-1 bg-black/80 backdrop-blur-md border border-white/10 rounded-full px-2 py-1 shadow-xl z-30 ${
@@ -1056,18 +1368,65 @@ export default function ChatPage() {
 
         {/* Message Input Box */}
         {activeChatId !== null && activeConversation && activeConversation.status === "accepted" && (
-          <div className="p-3 sm:p-4 bg-black/20 backdrop-blur-xl border-t border-white/5 relative z-40">
-            <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex items-center gap-2 sm:gap-3">
+          <div className="p-3 sm:p-4 bg-black/20 backdrop-blur-xl border-t border-white/5 relative z-40 flex flex-col">
+            
+            {/* ================= IMAGE PREVIEW AREA ================= */}
+            {selectedImage && (
+              <div className="max-w-3xl mx-auto w-full pb-3 px-2">
+                <div className="relative inline-block">
+                  <img 
+                    src={selectedImage} 
+                    alt="Preview" 
+                    className="h-24 w-24 object-cover rounded-xl border border-white/20 shadow-lg" 
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => setSelectedImage(null)} 
+                    className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow-md cursor-pointer transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ================= INPUT FORM AREA ================= */}
+            <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto w-full flex items-center gap-2 sm:gap-3">
+              
+              {/* HIDDEN FILE INPUT */}
+              <input 
+                type="file" 
+                accept="image/*" 
+                id="imageUpload" 
+                className="hidden" 
+                onChange={handleImageSelect} 
+              />
+              
+              {/* ATTACH PICTURE BUTTON */}
+              <label 
+                htmlFor="imageUpload" 
+                className="btn btn-circle btn-ghost bg-white/5 hover:bg-white/10 border-white/10 text-white/70 hover:text-white cursor-pointer h-12 w-12 sm:h-14 sm:w-14 flex-shrink-0"
+                title="Attach a photo"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 sm:w-6 sm:h-6">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                </svg>
+              </label>
+
+              {/* TEXT INPUT */}
               <input 
                 type="text"
                 placeholder="Type a message..."
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
-                className="input input-bordered flex-1 bg-white/5 border-white/10 text-white placeholder-white/40 focus:outline-none focus:border-purple-500 rounded-2xl h-12 sm:h-14 px-4 sm:px-5 backdrop-blur-md text-sm sm:text-base"
+                className="input input-bordered flex-1 bg-white/5 border-white/10 text-white placeholder-white/40 focus:outline-none focus:border-purple-500 rounded-2xl h-12 sm:h-14 px-4 sm:px-5 backdrop-blur-md text-sm sm:text-base min-w-0"
               />
+              
+              {/* SEND BUTTON */}
               <button 
                 type="submit"
-                className="btn bg-white hover:bg-gray-200 text-black border-none rounded-2xl h-12 sm:h-14 px-5 sm:px-6 font-semibold shadow-lg text-sm sm:text-base cursor-pointer"
+                disabled={!inputMessage.trim() && !selectedImage}
+                className="btn bg-white hover:bg-gray-200 text-black border-none rounded-2xl h-12 sm:h-14 px-5 sm:px-6 font-semibold shadow-lg text-sm sm:text-base cursor-pointer disabled:opacity-50 disabled:bg-white/50"
               >
                 Send
               </button>
